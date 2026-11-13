@@ -258,7 +258,7 @@ function personalizar(texto: string, ip: string, api: string): string {
 }
 
 function baixarArquivo(texto: string, nome: string): void {
-  const blob = new Blob(["\\uFEFF", texto], { type: "text/plain;charset=utf-8" });
+  const blob = new Blob(["\uFEFF", texto], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -282,15 +282,12 @@ export function Console() {
 
   useEffect(() => {
     let vivo = true;
-    let ipSalvo = "";
     let apiSalva = "";
     try {
-      ipSalvo = localStorage.getItem("speedtv-ip") || localStorage.getItem("nexo-ip") || "";
       apiSalva = localStorage.getItem("speedtv-api") || localStorage.getItem("nexo-api") || "";
     } catch {
       // Armazenamento bloqueado não pode impedir o uso do gerador.
     }
-    if (ipSalvo) setIp(ipSalvo);
     if (apiSalva) {
       setApi(apiSalva);
       setLembrarChave(true);
@@ -299,10 +296,6 @@ export function Console() {
       .then((texto) => {
         if (!vivo) return;
         setCodigo(texto);
-        if (!ipSalvo) {
-          const achado = texto.match(/DISPOSITIVO_PADRAO = "([^"]+)"/);
-          if (achado) setIp(achado[1]);
-        }
         if (!apiSalva) {
           const achado = texto.match(/API_KEY_PADRAO = "([^"]+)"/);
           if (achado) setApi(achado[1]);
