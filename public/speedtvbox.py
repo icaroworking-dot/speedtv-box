@@ -1587,7 +1587,8 @@ def imprimir_auditoria(r):
     if r.get("dmesg_memory"):
         say("  dmesg             : %s" % r["dmesg_memory"].splitlines()[0][:180])
     say("")
-    say("Acesso root         : %s" % ("confirmado" if r.get("root") else "não disponível"))\n    say("Widevine            : %s" % r.get("widevine"))
+    say("Acesso root         : %s" % ("confirmado" if r.get("root") else "não disponível"))
+    say("Widevine            : %s" % r.get("widevine"))
     arm = r.get("armazenamento") or {}
     say("Armazenamento /data : %s livres (%s)" % (kb_mb(arm.get("livre_kb")), arm.get("uso") or "sem %"))
     z = r.get("zram") or {}
