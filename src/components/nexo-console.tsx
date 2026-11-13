@@ -299,7 +299,7 @@ export function Console() {
       // Armazenamento bloqueado não pode impedir o uso do gerador.
     }
     if (apiSalva) {
-      setApi(apiSalva);
+      setApi(normalizarChave(apiSalva));
       setLembrarChave(true);
     }
     lerAgente()
@@ -308,7 +308,7 @@ export function Console() {
         setCodigo(texto);
         if (!apiSalva) {
           const achado = texto.match(/API_KEY_PADRAO = "([^"]+)"/);
-          if (achado) setApi(achado[1]);
+          if (achado) setApi(normalizarChave(achado[1]));
         }
         shaCurto(texto).then(setHash).catch(() => setHash("não disponível"));
       })
@@ -421,7 +421,7 @@ export function Console() {
             <input
               id="nexo-api"
               type="password"
-              placeholder="cole a chave do Gemini"
+              placeholder="Cole a chave do Gemini"
               value={api}
               onChange={(e) => setApi(normalizarChave(e.target.value))}
               autoComplete="off"
@@ -429,6 +429,9 @@ export function Console() {
               suppressHydrationWarning
               className="mt-1 w-full rounded-xl border border-line bg-bg-raised px-3 py-3 font-mono text-sm text-fg"
             />
+            <span className="mt-1 block text-xs text-faint">
+              Pode colar a chave diretamente, mesmo que venha com espaços ou quebras de linha.
+            </span>
           </label>
           <label className="mt-3 flex items-center gap-2 text-sm text-muted">
             <input type="checkbox" checked={lembrarChave} onChange={(e) => setLembrarChave(e.target.checked)} />
