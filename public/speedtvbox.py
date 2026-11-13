@@ -3,13 +3,14 @@
 """
 SpeedTV Box — agente de TV Box, pensado para o Termux no celular.
 
-    cp /sdcard/speedtvbox.py $HOME/
+    cp /sdcard/Download/speedtvbox.py $HOME/
     cd $HOME
     python speedtvbox.py
 
-O celular e a caixa na mesma rede. Nada é desinstalado do sistema: o
-debloat usa `pm disable-user`, reversível com `pm enable` ou com o reset
-físico. A chave e o IP são gravados pela página na hora do download.
+Na primeira vez, escolha 1. O agente lê, limpa e grava o relatório.
+O celular e a caixa na mesma rede. Nada é apagado do /system: o
+debloat usa `pm disable-user`, reversível com a opção Desfazer ou com
+o reset físico. A chave e o IP são gravados pela página na hora do download.
 SPEEDTV_API_KEY e SPEEDTV_DEVICE substituem esses valores se existirem.
 """
 from __future__ import annotations
@@ -31,7 +32,7 @@ DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "4"
+VERSAO = "5"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -276,6 +277,21 @@ WAVE3 = [
     "com.ionitech.airscreen",
     "com.google.android.marvin.talkback",
 ]
+
+# Apps que a fábrica enfia e não são codec, loja nem launcher.
+# A primeira vez pergunta. YouTube da TV fica de fora: muita caixa só tem ele.
+LIXO_FABRICA = (
+    ("org.xbmc.kodi", "Kodi"),
+    ("com.netflix.ninja", "Netflix"),
+    ("com.netflix.mediaclient", "Netflix"),
+    ("com.amazon.amazonvideo.livingroom", "Prime Video"),
+    ("com.amazon.avod.thirdpartyclient", "Prime Video"),
+    ("com.disney.disneyplus", "Disney+"),
+    ("com.globo.globotv", "Globoplay"),
+    ("com.google.android.videos", "Filmes Google"),
+    ("com.ionitech.airscreen", "AirScreen"),
+    ("com.softwinner.fireplayer", "Player da placa"),
+)
 
 BAD_EXACT = {
     "com.adups.fota",
@@ -1422,7 +1438,7 @@ def parecer_relatorio(r):
     for frase in frases_relatorio(r):
         say(frase)
         say("")
-    say("Nada foi desativado. Se quiser agir: 2 limpa, 3 repara a loja, 4 olha backdoor.")
+    say("Nada foi desativado. O caminho completo é a opção 1, Primeira vez.")
 
 
 def setting_get(adb, ns, chave):
@@ -1619,7 +1635,8 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
     titulo("Debloat em ondas")
     say("Cada onda desativa, reinicia, mede de novo e só continua se a caixa voltar.")
     say("Launcher, Play Store, GMS, WebView, teclado, HDMI e SystemUI estão fora.")
-    say("VocêTube de TV, Netflix e os outros streamings não entram.")
+    say("YouTube da TV fica. Netflix, Kodi e o resto de fábrica só saem se você")
+    say("confirmou na opção 1. Calendário, mapa e telefone podem sair: não são codec.")
     conectar_ou_explicar(adb)
     adb.refresh_user()
     home = home_package(adb)
@@ -2823,21 +2840,202 @@ def limpar_cache_silencioso(adb):
     return linha_metrica(antes) + "\n" + linha_metrica(depois)
 
 
+def achar_lixo(nomes):
+    tem = set(nomes or [])
+    return [(pkg, rotulo) for pkg, rotulo in LIXO_FABRICA if pkg in tem]
+
+
+def linha_android(r):
+    et = r.get("release") or "?"
+    sdk = r.get("sdk") or "?"
+    ker = r.get("kernel") or "?"
+    if (r.get("android") or {}).get("mentira"):
+        return (
+            "A etiqueta diz Android %s (SDK %s). O kernel %s não sustenta essa versão. É firmware remarcado."
+            % (et, sdk, ker)
+        )
+    return "Android %s (SDK %s), kernel %s. Etiqueta e kernel não se contradizem." % (et, sdk, ker)
+
+
+def linha_ram(r):
+    real = r.get("ram_real_mb")
+    livre = kb_mb(r.get("ram_disponivel_kb"))
+    base = "RAM verdadeira %s. Livre agora %s." % (("%d MB" % real) if real else "não medida", livre)
+    if r.get("ram_mentira"):
+        vitrine = ", ".join("%s MB" % a["mb"] for a in r["ram_mentira"])
+        return base + " A vitrine anuncia %s. Vale a verdadeira." % vitrine
+    return base + " Sem anúncio de RAM acima da medida."
+
+
+def linha_wide(r):
+    return "Widevine: %s." % (r.get("widevine") or "sem leitura")
+
+
+def mostrar_leitura(r, lixo):
+    titulo("O que a caixa é")
+    say("%s %s" % (r.get("marca") or "?", r.get("modelo") or "?"))
+    say(linha_android(r))
+    say(linha_ram(r))
+    say(linha_wide(r))
+    say(
+        "Pacotes: %s no total, %s de sistema, %s que alguém instalou."
+        % (r.get("pacotes"), r.get("sistema"), r.get("terceiros"))
+    )
+    ruins = nomes_de_risco(r)
+    if ruins:
+        say("Risco: %s." % ", ".join(ruins))
+        say("Desativar impede o serviço de subir. Não apaga o arquivo da firmware.")
+    else:
+        say("Risco: nenhum nome da lista (Adups, XCPE, miner).")
+    if lixo:
+        say("Veio de fábrica e não é sistema: %s." % ", ".join("%s (%s)" % (rot, pkg) for pkg, rot in lixo))
+    else:
+        say("Não achei Netflix, Kodi, Prime ou Disney pré-instalados.")
+    say("Não mexo em Play Store, GMS, WebView, launcher, teclado, HDMI nem no vídeo do sistema.")
+    say("Calendário, telefone, mapa e impressão podem sair. Não são codec.")
+
+
+def montar_relatorio_final(antes, depois, desligados, lixo):
+    fim = depois or antes
+    linhas = [
+        "SPEEDTV BOX — RELATÓRIO",
+        "Caixa: %s %s" % (antes.get("marca") or "?", antes.get("modelo") or "?"),
+        "Quando: %s" % (fim.get("quando") or ""),
+        "ADB: %s" % (antes.get("serial") or ""),
+        "",
+        "ANDROID",
+        "  Antes: " + linha_android(antes),
+    ]
+    if depois:
+        linhas.append("  Depois: " + linha_android(depois))
+    linhas += ["", "MEMÓRIA", "  Antes: " + linha_ram(antes)]
+    if depois:
+        linhas.append("  Depois: " + linha_ram(depois))
+    linhas += [
+        "",
+        "WIDEVINE",
+        "  " + linha_wide(antes),
+        "  L1 de caixa genérica só vale se um filme protegido tocar em HD.",
+        "  Sem root o nível não muda. Com root, a opção Widevine esconde a biblioteca falsa",
+        "  e o Android assume L3 de verdade, em SD.",
+        "",
+        "APLICATIVOS",
+        "  Antes: %s pacotes, %s de sistema, %s de terceiros."
+        % (antes.get("pacotes"), antes.get("sistema"), antes.get("terceiros")),
+    ]
+    if depois:
+        linhas.append(
+            "  Depois: %s pacotes, %s desativados no sistema."
+            % (depois.get("pacotes"), len(depois.get("desativados") or []))
+        )
+    if desligados:
+        linhas.append("  O SpeedTV Box desativou %d nesta sessão:" % len(desligados))
+        linhas.extend("    " + pkg for pkg in desligados)
+    else:
+        linhas.append("  Nenhum pacote foi desativado nesta sessão.")
+    if lixo:
+        linhas.append("  Lixo de fábrica visto na leitura:")
+        linhas.extend("    %s — %s" % (rot, pkg) for pkg, rot in lixo)
+    ruins = nomes_de_risco(antes)
+    linhas += [
+        "",
+        "O QUE NÃO FOI MEXIDO",
+        "  Play Store, Play Services, WebView, launcher, teclado, HDMI e pacotes de vídeo do sistema.",
+        "  Calendário e app de telefone entram na limpeza. Codec, não.",
+        "",
+        "RISCO",
+    ]
+    if ruins:
+        linhas.append("  Encontrado: " + ", ".join(ruins))
+        linhas.append("  Se o nome voltar ligado sozinho depois de reiniciar, a firmware recolocou.")
+        linhas.append("  Aí a caixa não é confiável na sua rede.")
+    else:
+        linhas.append("  Nenhum nome da lista conhecida.")
+    linhas += [
+        "",
+        "COMO LER",
+        "  A RAM que vale é a do kernel, não a da etiqueta.",
+        "  O Android que vale é o que o kernel aguenta, não o número da tela Sobre.",
+        "  Desativado para o usuário volta no reset de fábrica. Nada foi apagado de /system.",
+    ]
+    return "\n".join(linhas)
+
+
+def primeira_vez(adb, sim=False, sem_onda3=False):
+    titulo("Primeira vez")
+    say("Quatro passos, nesta ordem. Não precisa caçar número no menu.")
+    say("1. Ler a caixa, sem desativar nada.")
+    say("2. Se houver vírus ou backdoor, desativar.")
+    say("3. Limpar o lixo em ondas. Se a TV não voltar, a onda é desfeita.")
+    say("4. Gravar um relatório em português na pasta SpeedTV.")
+    say("")
+    say("Faça isto depois do reset de fábrica, com a depuração ligada.")
+    if not perguntar("Começar?", True, True if sim else None):
+        say("Nada foi feito.")
+        return
+    conectar_ou_explicar(adb)
+    antes = auditar(adb, falar=False)
+    lixo = achar_lixo(adb.installed_map())
+    mostrar_leitura(antes, lixo)
+    (garantir_dados() / "antes.json").write_text(
+        json.dumps(antes, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    journal = carregar_journal()
+    ja = set(journal.get("disabled") or [])
+
+    ruins = nomes_de_risco(antes)
+    if ruins:
+        say("")
+        if perguntar("Desativar o risco agora (%s)?" % ", ".join(ruins), True, True if sim else None):
+            desativar(adb, Gate(coletar_dinamicos(adb)), journal, ruins, "virus")
+        else:
+            say("Deixei o risco ligado. Se for o XCPE, tire a caixa da internet.")
+    else:
+        say("Passo 2: sem nome de risco.")
+
+    if lixo:
+        say("")
+        say("Isto não é codec nem a loja. Desativar não apaga. O reset liga de novo.")
+        rotulos = ", ".join(sorted({rot for _, rot in lixo}))
+        if perguntar("Desativar o que veio de fábrica (%s)?" % rotulos, True, True if sim else None):
+            desativar(adb, Gate(coletar_dinamicos(adb)), journal, [pkg for pkg, _ in lixo], "fabrica")
+
+    say("")
+    say("Passo 3 é a limpeza em ondas. Ela pergunta de novo antes de reiniciar.")
+    executar_ondas(adb, sim=sim, sem_onda3=sem_onda3)
+
+    say("")
+    say("Passo 4: lendo de novo para o relatório.")
+    depois = None
+    try:
+        if adb.state() == "device" or adb.connect():
+            if adb.state() == "device":
+                depois = auditar(adb, falar=False)
+    except (DeviceOffline, SystemExit, Exception):
+        depois = None
+    journal = carregar_journal()
+    desligados = [pkg for pkg in (journal.get("disabled") or []) if pkg not in ja]
+    texto = montar_relatorio_final(antes, depois, desligados, lixo)
+    log = anexar_log("relatorio", texto, texto)
+    titulo("Relatório")
+    say(texto)
+    dizer_onde(log)
+
+
 def menu(adb, sim=False, sem_onda3=False):
     while True:
         titulo("SpeedTV Box %s" % VERSAO)
         say("Caixa: %s    Gemini: %s" % (adb.serial, MODELO))
         say("Dados: %s" % garantir_dados())
         say("")
-        say("  1  Diagnóstico (só leitura)")
-        say("  2  Limpar a caixa (ondas, com volta atrás)")
-        say("  3  Reparar a Google Play Store")
-        say("  4  Segurança (backdoor e adware)")
-        say("  5  Widevine (ler, L3 de verdade, ou restaurar)")
-        say("  6  Afinar (cache, rede, ficar ligada, 1080p)")
-        say("  7  Reverter o que o SpeedTV Box mudou")
-        say("  8  Perguntar ao Gemini")
-        say("  9  Ferramentas (comparar, boot, RAM, abrir, reiniciar)")
+        say("Faça nesta ordem, uma vez, depois do reset de fábrica:")
+        say("  1  Primeira vez — ler, limpar e entregar o relatório")
+        say("")
+        say("Se precisar de novo:")
+        say("  2  Só olhar")
+        say("  3  Continuar a limpeza")
+        say("  4  Reparar a Play Store")
+        say("  5  Outras coisas")
         say("  0  Sair")
         try:
             escolha = input("\nOpção: ").strip()
@@ -2845,30 +3043,20 @@ def menu(adb, sim=False, sem_onda3=False):
             return
         try:
             if escolha == "1":
+                primeira_vez(adb, sim=sim, sem_onda3=sem_onda3)
+            elif escolha == "2":
                 conectar_ou_explicar(adb)
                 diagnostico(adb)
-            elif escolha == "2":
-                executar_ondas(adb, sim=sim, sem_onda3=sem_onda3)
             elif escolha == "3":
-                playstore(adb, sim=sim)
+                executar_ondas(adb, sim=sim, sem_onda3=sem_onda3)
             elif escolha == "4":
-                seguranca(adb, sim=sim)
+                playstore(adb, sim=sim)
             elif escolha == "5":
-                widevine(adb, sim=sim)
-            elif escolha == "6":
-                afinar(adb, sim=sim)
-            elif escolha == "7":
-                reverter(adb, sim=sim)
-            elif escolha == "8":
-                q = input("Pergunta: ").strip()
-                if q:
-                    perguntar_gemini(adb, q)
-            elif escolha == "9":
-                submenu(adb, sim)
+                outras(adb, sim, sem_onda3)
             elif escolha == "0":
                 return
             else:
-                say("Não conheço essa opção.")
+                say("Não conheço essa opção. Na primeira vez, é a 1.")
         except DeviceOffline as exc:
             say("A caixa saiu do ADB: %s" % exc)
         except SystemExit:
@@ -2878,6 +3066,42 @@ def menu(adb, sim=False, sem_onda3=False):
             return
         except Exception as exc:
             say("Erro: %s" % exc)
+
+
+def outras(adb, sim=False, sem_onda3=False):
+    titulo("Outras coisas")
+    say("  1  Segurança (backdoor e adware)")
+    say("  2  Widevine (ler, L3 de verdade, ou restaurar)")
+    say("  3  Afinar (cache, rede, ficar ligada, 1080p)")
+    say("  4  Desfazer o que o SpeedTV Box mudou")
+    say("  5  Perguntar ao Gemini")
+    say("  6  Ferramentas")
+    say("  0  Voltar")
+    try:
+        escolha = input("\nOpção: ").strip()
+    except EOFError:
+        return
+    if escolha == "1":
+        seguranca(adb, sim=sim)
+    elif escolha == "2":
+        widevine(adb, sim=sim)
+    elif escolha == "3":
+        afinar(adb, sim=sim)
+    elif escolha == "4":
+        reverter(adb, sim=sim)
+    elif escolha == "5":
+        try:
+            q = input("Pergunta: ").strip()
+        except EOFError:
+            return
+        if q:
+            perguntar_gemini(adb, q)
+    elif escolha == "6":
+        submenu(adb, sim)
+    elif escolha in ("0", ""):
+        return
+    else:
+        say("Não conheço essa opção.")
 
 
 def submenu(adb, sim=False):
@@ -2943,6 +3167,28 @@ def selftest():
     assert parse_kernel("Linux version 4.9.113 (builder@box)") == (4, 9)
     wide = parse_widevine("plugin widevine\nsecurityLevel: L3\n")
     assert "L3" in wide
+    texto = montar_relatorio_final(
+        {
+            "marca": "Box", "modelo": "Link", "release": "14", "sdk": 34, "kernel": "4.9",
+            "android": {"mentira": True}, "ram_real_mb": 1024, "ram_disponivel_kb": 700000,
+            "ram_mentira": [{"mb": 4096}], "widevine": "Widevine L3",
+            "pacotes": 200, "sistema": 180, "terceiros": 20, "quando": "t", "serial": "s",
+            "ruins": ["com.oemservice"],
+        },
+        {
+            "android": {"mentira": True}, "release": "14", "sdk": 34, "kernel": "4.9",
+            "ram_real_mb": 1024, "ram_disponivel_kb": 800000, "pacotes": 200,
+            "desativados": ["com.android.calendar"], "quando": "t2",
+        },
+        ["com.android.calendar"],
+        [("org.xbmc.kodi", "Kodi")],
+    )
+    assert "1024 MB" in texto
+    assert "Kodi" in texto
+    assert "com.oemservice" in texto
+    assert "com.android.calendar" in texto
+    assert achar_lixo(["org.xbmc.kodi", "com.android.vending"]) == [("org.xbmc.kodi", "Kodi")]
+    assert achar_lixo(["com.google.android.gms"]) == []
     data = extrair_json("```json\n{\"diagnostico\": \"webview\", \"acoes\": []}\n```")
     assert data["diagnostico"] == "webview"
     nomes = parse_pm_names("package:com.android.vending\npackage:/system/app/X.apk=com.foo.bar\n")
@@ -2984,7 +3230,7 @@ def main(argv=None):
             "menu", "auditoria", "diagnostico", "debloat", "playstore", "comparar",
             "cache", "zram", "rede", "video", "boot", "virus", "seguranca",
             "widevine", "afinar", "abrir", "reiniciar", "ram", "reverter",
-            "perguntar", "selftest",
+            "perguntar", "selftest", "primeira",
         ],
     )
     parser.add_argument("extra", nargs="*", help="pacote, ou o texto da pergunta")
@@ -3010,6 +3256,8 @@ def main(argv=None):
     try:
         if args.comando == "menu":
             menu(adb, sim=args.sim, sem_onda3=args.sem_onda3)
+        elif args.comando == "primeira":
+            primeira_vez(adb, sim=args.sim, sem_onda3=args.sem_onda3)
         elif args.comando in ("auditoria", "diagnostico"):
             conectar_ou_explicar(adb)
             diagnostico(adb)

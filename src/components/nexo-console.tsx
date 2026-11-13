@@ -14,33 +14,27 @@ const FILE = "/speedtvbox.py";
 const ONDAS = [
   {
     n: "01",
-    nome: "Diagnóstico",
+    nome: "Ler",
     texto:
-      "Uma leitura só: RAM real contra a de vitrine, SDK contra o kernel, Widevine, biblioteca OEM, armazenamento, ZRAM, Play Store, porta aberta e o backdoor XCPE (com.oemservice).",
+      "RAM real contra a de vitrine, Android da etiqueta contra o kernel, Widevine, app de fábrica e nome de vírus. Nada é desativado.",
   },
   {
     n: "02",
-    nome: "Limpar",
+    nome: "Perguntar",
     texto:
-      "Ondas de disable-user com reboot e checagem. Não mexe em launcher, loja, GMS, WebView, teclado, HDMI nem SystemUI. YouTube, Netflix, Prime e Disney ficam.",
+      "Se achar XCPE ou Adups, pergunta se desativa. Se achar Netflix, Kodi, Prime ou Disney de fábrica, pergunta de novo. YouTube da TV fica.",
   },
   {
     n: "03",
-    nome: "Loja e segurança",
+    nome: "Limpar",
     texto:
-      "O reparo da Play Store que já funcionou na sua caixa continua. A opção Segurança desativa Adups e o XCPE sem apagar o APK — a firmware reporia o arquivo.",
+      "Ondas com reinício. Calendário e app de telefone podem sair. Loja, GMS, WebView, launcher, teclado, HDMI e codec não.",
   },
   {
     n: "04",
-    nome: "Widevine",
+    nome: "Relatório",
     texto:
-      "Não fabrica L1. Se o L1 da caixa for falso e o app ficar em tela preta, com root esconde liboemcrypto.so. O Android assume L3 de verdade e o vídeo protegido toca em SD. Reverter devolve o arquivo.",
-  },
-  {
-    n: "05",
-    nome: "Afinar",
-    texto:
-      "Cache, DNS, Wi-Fi sem dormir, caixa ligada enquanto estiver na tomada, ZRAM só com root, 1080p só se a RAM real for baixa.",
+      "Um texto na pasta SpeedTV: antes e depois, a lista do que saiu, a RAM verdadeira, o Android verdadeiro e o Widevine.",
   },
 ];
 
@@ -54,15 +48,147 @@ const MEDIDAS = [
 ];
 
 const COMANDOS = [
-  ["python speedtvbox.py", "menu curto"],
-  ["python speedtvbox.py diagnostico", "só leitura"],
-  ["python speedtvbox.py debloat", "ondas, com pergunta"],
-  ["python speedtvbox.py playstore", "reparo da loja"],
-  ["python speedtvbox.py seguranca", "XCPE e Adups"],
-  ["python speedtvbox.py widevine", "L3 de verdade, se quiser"],
-  ["python speedtvbox.py afinar", "cache, rede, 1080p"],
+  ["python speedtvbox.py", "abre o menu. Na primeira vez, escolha 1"],
+  ["python speedtvbox.py primeira", "o mesmo caminho, sem abrir o menu"],
+  ["python speedtvbox.py playstore", "só o reparo da loja"],
   ["python speedtvbox.py reverter", "desfaz o que o SpeedTV Box mudou"],
 ];
+
+const PASSOS = [
+  {
+    n: "01",
+    nome: "Reset de fábrica",
+    texto:
+      "Caixa usada começa pelo recovery. O furinho RESET fica no fundo, em geral ao lado da entrada AV. Segure com um clipe, ligue na tomada e segure uns dez segundos. Wipe cache, depois Wipe data / factory reset, depois Reboot. Se a HDMI ficar preta, use o cabo amarelo de vídeo ou outra porta da TV. O controle quase nunca anda nesse menu: use um teclado USB. O reset apaga conta e app. Não apaga vírus gravado na firmware.",
+  },
+  {
+    n: "02",
+    nome: "Depuração",
+    texto:
+      "Mesma Wi-Fi do celular. Configurações, Sobre, sete toques em Compilação. Opções do desenvolvedor, Depuração USB. No Android 11 ou mais novo, a depuração sem fio mostra um código. Anote o IP da rede. A porta do dia a dia é 5555. A porta do pareamento é outra, a que está na tela.",
+  },
+  {
+    n: "03",
+    nome: "Baixar o agente",
+    texto:
+      "Nesta página, aba Baixar. Cole o IP e a chave do Gemini. Baixe o .py. A chave fica só nesse arquivo, no seu celular. Não publique esse arquivo.",
+  },
+  {
+    n: "04",
+    nome: "Escolher 1",
+    texto:
+      "No Termux, os comandos abaixo. Dentro do agente, só a opção 1. Ela lê, pergunta se desativa vírus e app de fábrica, limpa em ondas e grava o relatório na pasta SpeedTV.",
+  },
+];
+
+function Tutorial() {
+  return (
+    <div className="mt-8 space-y-8">
+      <section className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+        <p className="font-mono text-xs tracking-widest text-amber">PRIMEIRA VEZ</p>
+        <h2 className="mt-2 font-display text-4xl leading-none text-fg">Do reset até o relatório</h2>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+          O uso normal é uma vez por caixa, depois do reset. O agente não é um menu para ficar fuçando. A opção 1 faz o caminho inteiro e pergunta antes de desativar qualquer coisa.
+        </p>
+      </section>
+
+      <section>
+        <h2 className="font-display text-3xl text-fg">O que instalar</h2>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <article className="rounded-2xl border border-line bg-bg-raised p-5">
+            <h3 className="font-display text-2xl text-fg">Celular</h3>
+            <ol className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
+              <li>Termux pelo F-Droid. A cópia da Play Store está velha e falha.</li>
+              <li>
+                Uma vez, dentro do Termux:{" "}
+                <span className="font-mono text-xs text-fg">pkg update && pkg install python android-tools</span>
+              </li>
+              <li>
+                Depois: <span className="font-mono text-xs text-fg">termux-setup-storage</span> e aceite o acesso aos arquivos.
+              </li>
+            </ol>
+          </article>
+          <article className="rounded-2xl border border-line bg-bg-raised p-5">
+            <h3 className="font-display text-2xl text-fg">Computador</h3>
+            <ol className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
+              <li>Python 3, do site python.org.</li>
+              <li>Platform-Tools, do site de desenvolvedores Android. Descompacte.</li>
+              <li>No Windows, Prompt de Comando. No Mac, Terminal. Os comandos são os mesmos.</li>
+              <li>Cabo USB só se a caixa aceitar depuração por cabo. Wi-Fi basta quando a depuração sem fio está ligada.</li>
+            </ol>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="font-display text-3xl text-fg">A ordem</h2>
+        <ol className="mt-4 divide-y divide-line border-y border-line">
+          {PASSOS.map((passo) => (
+            <li key={passo.n} className="grid gap-2 py-4 sm:grid-cols-12 sm:gap-6">
+              <p className="font-mono text-sm text-amber sm:col-span-2">{passo.n}</p>
+              <div className="sm:col-span-10">
+                <p className="text-fg">{passo.nome}</p>
+                <p className="mt-1 text-sm leading-relaxed text-muted">{passo.texto}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <article className="rounded-2xl border border-line bg-surface p-5">
+          <h3 className="font-display text-2xl text-fg">No Termux</h3>
+          <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-fg">{`termux-setup-storage
+cp /sdcard/Download/speedtvbox.py $HOME/
+cd $HOME
+python speedtvbox.py`}</pre>
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            Se o arquivo não estiver dentro de Download, use <span className="font-mono text-fg">cp /sdcard/speedtvbox.py $HOME/</span>. Não escreva um til com barra. Na TV, aceite a depuração.
+          </p>
+        </article>
+        <article className="rounded-2xl border border-line bg-surface p-5">
+          <h3 className="font-display text-2xl text-fg">No computador</h3>
+          <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-fg">{`adb connect 192.168.1.88:5555
+python speedtvbox.py`}</pre>
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            Troque o IP pelo da caixa. Rode na pasta onde estão o platform-tools e o arquivo baixado. Se o comando adb não existir, entre na pasta do platform-tools.
+          </p>
+        </article>
+      </section>
+
+      <section className="rounded-2xl border border-line bg-bg-raised p-5 sm:p-6">
+        <h2 className="font-display text-3xl text-fg">O que a opção 1 faz</h2>
+        <ol className="mt-4 space-y-3 text-sm leading-relaxed text-muted">
+          <li>
+            <span className="text-fg">Lê, sem desativar.</span> RAM verdadeira contra a da etiqueta, Android da tela Sobre contra o kernel, Widevine, pacotes, app escondido e nome de vírus.
+          </li>
+          <li>
+            <span className="text-fg">Pergunta do risco.</span> Adups e o backdoor XCPE (com.oemservice) são desativados se você disser sim. Não são apagados: a firmware reporia o arquivo.
+          </li>
+          <li>
+            <span className="text-fg">Pergunta do que veio de fábrica.</span> Netflix, Kodi, Prime, Disney, Globoplay. YouTube da TV fica. Play Store, GMS, WebView, launcher, teclado, HDMI e codec não entram.
+          </li>
+          <li>
+            <span className="text-fg">Limpa em ondas.</span> Calendário, telefone, mapa, impressão e telemetria. Reinicia. Se a tela inicial, a loja ou o SystemUI quebrarem, desfaz a onda.
+          </li>
+          <li>
+            <span className="text-fg">Relatório.</span> Pasta SpeedTV, na memória interna, ao lado de Download. Em português: apps antes e depois, o que foi desativado, RAM de vitrine contra a real, Android de vitrine contra o kernel, Widevine.
+          </li>
+        </ol>
+      </section>
+
+      <section>
+        <h2 className="font-display text-3xl text-fg">Não faça</h2>
+        <ul className="mt-4 space-y-2 text-sm leading-relaxed text-muted">
+          <li>Não comece pela limpeza solta nem pela Play Store. Na primeira vez a opção é a 1.</li>
+          <li>Não confirme o recovery se a linha selecionada não estiver visível.</li>
+          <li>Não apague pacote de sistema com outro programa. Aí o reset deixa de desfazer.</li>
+          <li>Se a TV não voltar depois de uma onda, tire da tomada por 30 segundos. Se continuar morta, repita o reset de fábrica.</li>
+        </ul>
+      </section>
+    </div>
+  );
+}
 
 async function lerAgente(): Promise<string> {
   const res = await fetch(FILE);
@@ -114,6 +240,7 @@ export function Console() {
   const [hash, setHash] = useState("");
   const [ip, setIp] = useState("192.168.1.88:5555");
   const [api, setApi] = useState("");
+  const [aba, setAba] = useState<"baixar" | "tutorial">("baixar");
 
   useEffect(() => {
     let vivo = true;
@@ -174,9 +301,33 @@ export function Console() {
           <h1 className="font-display text-5xl leading-none text-fg sm:text-6xl">SpeedTV Box</h1>
         </div>
         <p className="max-w-xs text-sm text-muted">
-          Versão 4. Cada exame explica o que achou e pergunta antes de mexer.
+          Versão 5. A primeira vez é a opção 1: lê, limpa e entrega o relatório.
         </p>
       </header>
+
+      <div className="mt-6 flex gap-2">
+        <button
+          type="button"
+          aria-pressed={aba === "baixar"}
+          className={`inline-flex min-h-11 items-center rounded-xl px-4 text-sm ${aba === "baixar" ? "bg-amber font-semibold text-amber-ink" : "border border-line text-fg"}`}
+          onClick={() => setAba("baixar")}
+        >
+          Baixar
+        </button>
+        <button
+          type="button"
+          aria-pressed={aba === "tutorial"}
+          className={`inline-flex min-h-11 items-center rounded-xl px-4 text-sm ${aba === "tutorial" ? "bg-amber font-semibold text-amber-ink" : "border border-line text-fg"}`}
+          onClick={() => setAba("tutorial")}
+        >
+          Tutorial
+        </button>
+      </div>
+
+      {aba === "tutorial" ? (
+        <Tutorial />
+      ) : (
+        <>
 
       <section className="mt-8 grid gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6 lg:col-span-2">
@@ -249,19 +400,16 @@ export function Console() {
           <p className="font-display text-2xl text-fg">No Termux</p>
           <ol className="mt-3 space-y-3 text-sm text-muted">
             <li>
-              <span className="text-fg">1.</span> Baixe o .py. O celular e a caixa no mesmo Wi-Fi.
+              <span className="text-fg">1.</span> Baixe o .py. Celular e caixa no mesmo Wi-Fi.
             </li>
             <li>
               <span className="font-mono text-xs text-fg">cp /sdcard/Download/speedtvbox.py $HOME/</span>
             </li>
             <li>
-              <span className="font-mono text-xs text-fg">cd $HOME</span>
+              <span className="font-mono text-xs text-fg">cd $HOME && python speedtvbox.py</span>
             </li>
             <li>
-              <span className="font-mono text-xs text-fg">python speedtvbox.py</span>
-            </li>
-            <li>
-              <span className="text-fg">2.</span> Na TV, aceite a depuração. Android 11+ pede o código de pareamento; o menu pergunta.
+              <span className="text-fg">2.</span> Na primeira vez, escolha 1. O passo a passo do reset está na aba Tutorial.
             </li>
           </ol>
         </aside>
@@ -291,7 +439,7 @@ export function Console() {
       </section>
 
       <section className="mt-10">
-        <h2 className="font-display text-3xl">O que mudou</h2>
+        <h2 className="font-display text-3xl">O caminho da opção 1</h2>
         <ol className="mt-4 divide-y divide-line border-y border-line">
           {ONDAS.map((onda) => (
             <li key={onda.n} className="grid gap-2 py-4 sm:grid-cols-12 sm:gap-6">
@@ -384,6 +532,8 @@ export function Console() {
           A página não guarda a chave. Ela entra só no arquivo que você baixa, no seu celular. Não suba esse arquivo baixado num GitHub público.
         </p>
       </section>
+        </>
+      )}
     </main>
   );
 }
