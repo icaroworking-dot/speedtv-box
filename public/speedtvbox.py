@@ -3354,9 +3354,10 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
         barras = []
         for nome, valor in valores:
             largura = max(1, min(100, int((valor / maximo) * 100)))
+            valor_legivel = fmt_kb(valor) if chave.endswith("_kb") else ("%s%s" % (round(valor, 1), unidade))
             barras.append(
-                '<div class="barrow"><div class="barlabel">%s</div><div class="track"><i style="width:%d%%"></i></div><b>%s%s</b></div>'
-                % (esc(nome), largura, esc(round(valor, 1)), esc(unidade))
+                '<div class="barrow"><div class="barlabel">%s</div><div class="track"><i style="width:%d%%"></i></div><b>%s</b></div>'
+                % (esc(nome), largura, esc(valor_legivel))
             )
         return (
             '<section class="panel"><div class="section-head"><div><p class="eyebrow">DESEMPENHO</p>'
@@ -3430,6 +3431,8 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
         "<li><b>%s</b><small>%s</small></li>" % (esc(nome), esc(pkg))
         for pkg, nome in (lixo or [])
     ) or "<li>Nenhum item conhecido da lista de aplicativos de fábrica foi encontrado.</li>"
+    terceiros = antes.get("pacotes_terceiros") or []
+    third_party_html = "".join("<li>%s</li>" % esc(pkg) for pkg in terceiros) or "<li>Nenhum aplicativo de terceiros identificado.</li>"
 
     diagnostics = []
     for item in ler_diagnosticos_operacionais(pasta):
@@ -3552,13 +3555,13 @@ details{border-top:1px solid #ffffff12;padding:13px 0}details summary{cursor:poi
 <section class="panel"><div class="section-head"><div><p class="eyebrow">06 · AÇÕES</p><h2>Aplicativos e alterações</h2><p class="muted">Desativado não significa APK apagado. O estado original pode ser restaurado pelo agente quando registrado.</p></div></div><div class="columns"><div><h3>Desativados nesta sessão</h3><ul class="list">__PACKAGES__</ul></div><div><h3>Aplicativos de fábrica identificados</h3><ul class="list">__FACTORY__</ul></div></div></section>
 <section class="panel"><div class="section-head"><div><p class="eyebrow">07 · DIAGNÓSTICOS</p><h2>Testes complementares realizados</h2></div></div>__DIAGNOSTICS__</section>
 <section class="panel"><div class="section-head"><div><p class="eyebrow">08 · HISTÓRICO</p><h2>Métricas por etapa</h2><p class="muted">A comparação depende das amostras realmente coletadas nesta sessão.</p></div></div><div class="table-wrap"><table><thead><tr><th>Etapa</th><th>RAM disponível</th><th>Processos</th><th>Desativados</th><th>Armazenamento livre</th></tr></thead><tbody>__ROWS__</tbody></table></div></section>
-<section class="panel"><div class="section-head"><div><p class="eyebrow">09 · DETALHES</p><h2>Dados técnicos adicionais</h2></div></div><details><summary>Fingerprint, serviços, portas e pacotes sinalizados</summary><pre>__ADVANCED__</pre></details><details><summary>Como interpretar este relatório</summary><p class="muted">MemAvailable (ou livre + cache em kernels antigos) é mais útil que MemFree isolado. A contagem de processos é aproximada. O nível Widevine exposto pelo sistema não garante certificação de um serviço de streaming. A ausência de indicadores conhecidos não comprova que a firmware esteja livre de malware. A leitura de frequência e temperatura depende do que o fabricante expõe ao Android.</p></details></section>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">09 · DETALHES</p><h2>Dados técnicos adicionais</h2></div></div><details><summary>Aplicativos de terceiros instalados (__THIRD_COUNT__)</summary><ul class="list">__THIRD_PARTY__</ul></details><details><summary>Fingerprint, serviços, portas e pacotes sinalizados</summary><pre>__ADVANCED__</pre></details><details><summary>Como interpretar este relatório</summary><p class="muted">MemAvailable (ou livre + cache em kernels antigos) é mais útil que MemFree isolado. A contagem de processos é aproximada. O nível Widevine exposto pelo sistema não garante certificação de um serviço de streaming. A ausência de indicadores conhecidos não comprova que a firmware esteja livre de malware. A leitura de frequência e temperatura depende do que o fabricante expõe ao Android.</p></details></section>
 <footer class="footer"><div><b>SPEEDTV BOX</b><br>Relatório local · não envia os dados para servidores externos</div><div>Arquivo gerado automaticamente<br>__DATE__</div></footer>
 </main></body></html>"""
 
-    ram_chart = grafico("RAM disponível por etapa", "mem_available_kb", " kB", "Memória utilizável, não apenas RAM livre.")
+    ram_chart = grafico("RAM disponível por etapa", "mem_available_kb", "", "Memória utilizável, não apenas RAM livre.")
     process_chart = grafico("Processos em execução", "processos", "", "Contagem aproximada de processos visíveis ao Android.")
-    storage_chart = grafico("Armazenamento livre", "data_livre_kb", " kB", "Espaço livre na partição de dados.")
+    storage_chart = grafico("Armazenamento livre", "data_livre_kb", "", "Espaço livre na partição de dados.")
     disabled_chart = grafico("Pacotes desativados", "desativados", "", "Contagem acumulada em cada medição.")
     html_doc = (html_doc
         .replace("__DEVICE__", esc(dispositivo))
@@ -3592,6 +3595,8 @@ details{border-top:1px solid #ffffff12;padding:13px 0}details summary{cursor:poi
         .replace("__FACTORY__", factory_items)
         .replace("__DIAGNOSTICS__", diagnostics_html)
         .replace("__ROWS__", "".join(data_rows))
+        .replace("__THIRD_COUNT__", str(len(terceiros)))
+        .replace("__THIRD_PARTY__", third_party_html)
         .replace("__ADVANCED__", esc(json.dumps({
             "fingerprint": antes.get("fingerprint"),
             "display": antes.get("display"),
