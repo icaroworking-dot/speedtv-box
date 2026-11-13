@@ -78,7 +78,7 @@ const PASSOS = [
     n: "03",
     nome: "Baixar o agente",
     texto:
-      "Nesta página, aba Preparar agente. Cole o IP e a chave do Gemini, toque em Gerar .py e depois no link Salvar .py. A chave fica dentro desse arquivo. Não o publique.",
+      "Nesta página, aba Preparar agente. Cole somente o IP (sem :5555) e a chave do Gemini, toque em Gerar .py e depois no link Salvar .py. A chave fica dentro desse arquivo. Não o publique.",
   },
   {
     n: "04",
@@ -152,7 +152,7 @@ function Tutorial() {
         </article>
         <article className="rounded-2xl border border-line bg-surface p-5">
           <h3 className="font-display text-2xl text-fg">No computador</h3>
-          <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-fg">{`adb connect 192.168.1.88:5555
+          <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-fg">{`adb connect IP_DA_TV:5555
 python speedtvbox.py`}</pre>
           <p className="mt-3 text-sm leading-relaxed text-muted">
             Troque o IP pelo da TV Box. Rode na pasta onde estão o platform-tools e o arquivo baixado. Se o comando adb não existir, entre na pasta do platform-tools.
@@ -236,14 +236,10 @@ async function shaCurto(texto: string): Promise<string> {
 
 function personalizar(texto: string, ip: string, api: string): string {
   let alvo = ip.trim();
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(alvo)) alvo += ":5555";
-  const partes = alvo.split(":");
-  const octetos = partes[0].split(".");
-  const porta = Number(partes[1]);
+  const octetos = alvo.split(".");
   const ipValido = octetos.length === 4 && octetos.every((parte) => /^\d{1,3}$/.test(parte) && Number(parte) >= 0 && Number(parte) <= 255);
-  if (!ipValido || partes.length !== 2 || !Number.isInteger(porta) || porta < 1 || porta > 65535) {
-    throw new Error("IP inválido. Use um IPv4 válido, com porta opcional (ex.: 192.168.1.88:5555).");
-  }
+  if (!ipValido) throw new Error("Informe somente o IP da TV Box, por exemplo: 192.168.1.100.");
+  alvo += ":5555";
   const chave = api.trim();
   if (!/^[A-Za-z0-9_-]{20,256}$/.test(chave)) {
     throw new Error("Cole a chave do Gemini, numa linha só.");
@@ -261,10 +257,17 @@ function personalizar(texto: string, ip: string, api: string): string {
   return pronto;
 }
 
-function criarArquivo(texto: string): string {
-  return URL.createObjectURL(
-    new Blob(["\uFEFF", texto], { type: "text/plain;charset=utf-8" })
-  );
+function baixarArquivo(texto: string, nome: string): void {
+  const blob = new Blob(["\\uFEFF", texto], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = nome;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 export function Console() {
@@ -272,11 +275,9 @@ export function Console() {
   const [codigo, setCodigo] = useState("");
   const [aberto, setAberto] = useState(false);
   const [hash, setHash] = useState("");
-  const [ip, setIp] = useState("192.168.1.88:5555");
+  const [ip, setIp] = useState("");
   const [api, setApi] = useState("");
   const [lembrarChave, setLembrarChave] = useState(false);
-  const [downloadPy, setDownloadPy] = useState("");
-  const [downloadTxt, setDownloadTxt] = useState("");
   const [aba, setAba] = useState<"baixar" | "tutorial">("baixar");
 
   useEffect(() => {
@@ -332,18 +333,11 @@ export function Console() {
       } catch {
         // Preferências são opcionais; falha de storage nunca bloqueia a geração.
       }
-      await fn(pronto);
+      fn(pronto);
     } catch (erro) {
       setAviso(erro instanceof Error ? erro.message : "Não deu para montar o arquivo.");
     }
   }
-
-  useEffect(() => {
-    return () => {
-      if (downloadPy) URL.revokeObjectURL(downloadPy);
-      if (downloadTxt) URL.revokeObjectURL(downloadTxt);
-    };
-  }, [downloadPy, downloadTxt]);
 
   return (
     <main className="mx-auto max-w-5xl px-4 pb-24 pt-8 sm:px-6 sm:pt-12">
@@ -386,7 +380,7 @@ export function Console() {
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <div>
             <p className="font-display text-2xl text-fg">1. Configure</p>
-            <p className="mt-1 text-sm leading-relaxed text-muted">Informe o IP da TV Box e sua chave Gemini. O IP já vem preenchido como exemplo.</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted">Informe somente o IP da TV Box e sua chave Gemini. A porta ADB 5555 é adicionada automaticamente.</p>
           </div>
           <div>
             <p className="font-display text-2xl text-fg">2. Baixe</p>
@@ -403,11 +397,12 @@ export function Console() {
         <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6 lg:col-span-2">
           <p className="font-mono text-xs text-faint">sua TV Box, neste arquivo</p>
           <label className="mt-3 block text-sm text-muted" htmlFor="nexo-ip">
-            IP da TV
+            IP da TV Box (sem porta)
             <input
               id="nexo-ip"
               value={ip}
               onChange={(e) => setIp(e.target.value)}
+              placeholder="Ex.: 192.168.1.100"
               autoComplete="off"
               spellCheck={false}
               suppressHydrationWarning
@@ -440,10 +435,9 @@ export function Console() {
               type="button"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-amber px-4 text-sm font-semibold text-amber-ink"
               onClick={() =>
-                void comPersonalizado((t) => {
-                  setDownloadTxt("");
-                  setDownloadPy(criarArquivo(t));
-                  setAviso("Agente personalizado pronto. Agora toque em “Salvar .py” logo abaixo.");
+                comPersonalizado((t) => {
+                  baixarArquivo(t, "speedtvbox.py");
+                  setAviso("Download do agente iniciado.");
                 })
               }
             >
@@ -454,10 +448,9 @@ export function Console() {
               type="button"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-bg-raised px-4 text-sm text-fg"
               onClick={() =>
-                void comPersonalizado((t) => {
-                  setDownloadPy("");
-                  setDownloadTxt(criarArquivo(t));
-                  setAviso("Arquivo de texto pronto. Agora toque em “Salvar .txt” logo abaixo.");
+                comPersonalizado((t) => {
+                  baixarArquivo(t, "speedtvbox.txt");
+                  setAviso("Download do TXT iniciado.");
                 })
               }
             >
@@ -467,9 +460,11 @@ export function Console() {
               type="button"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-bg-raised px-4 text-sm text-fg"
               onClick={() =>
-                comPersonalizado(async (t) => {
-                  await navigator.clipboard.writeText(t);
-                  setAviso("Código copiado, já com este IP e esta chave.");
+                comPersonalizado((t) => {
+                  void navigator.clipboard.writeText(t).then(
+                    () => setAviso("Código copiado, já com este IP e esta chave."),
+                    () => setAviso("O navegador bloqueou a cópia. Use Gerar .txt para salvar o conteúdo.")
+                  );
                 })
               }
             >
@@ -477,32 +472,6 @@ export function Console() {
               Copiar
             </button>
           </div>
-          {(downloadPy || downloadTxt) ? (
-            <div className="mt-4 rounded-xl border border-line bg-bg-raised p-3">
-              <p className="text-sm font-semibold text-fg">Arquivo pronto para salvar</p>
-              <p className="mt-1 text-xs text-muted">Toque no link do arquivo. Esta segunda etapa usa um link real de download, mais confiável no Chrome do Android.</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {downloadPy ? (
-                  <a
-                    href={downloadPy}
-                    download="speedtvbox.py"
-                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-amber px-4 text-sm font-semibold text-amber-ink"
-                  >
-                    Salvar .py
-                  </a>
-                ) : null}
-                {downloadTxt ? (
-                  <a
-                    href={downloadTxt}
-                    download="speedtvbox.txt"
-                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-line px-4 text-sm text-fg"
-                  >
-                    Salvar .txt
-                  </a>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
           {hash ? (
             <p className="mt-3 font-mono text-xs text-faint">SHA-256 do agente-base: {hash}</p>
           ) : null}
