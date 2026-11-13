@@ -3610,8 +3610,8 @@ def instalar_launcher(adb, escolha):
     catalogo = {
         "glass": {
             "nome": "Glass Launcher",
-            "api": "",
-            "hosts": set(),
+            "api": "https://api.github.com/repos/tlfares/GlassLauncher/releases/latest",
+            "hosts": {"api.github.com", "github.com", "release-assets.githubusercontent.com"},
             "pacote": "com.fares.glass",
             "arquivo": "FlareGlassLauncher.apk",
         },
