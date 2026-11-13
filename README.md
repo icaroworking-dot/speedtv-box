@@ -36,7 +36,7 @@ Na primeira execução, escolha **1 — Começar**. O assistente conduz a audito
 - Gera TXT, JSON e um relatório HTML offline com gráficos e métricas por etapa.
 - Menu guiado por finalidade: começar/otimizar, diagnóstico sem alterações, memória e armazenamento, instaladores, segurança, recuperação e ferramentas.
 - Instala Glass Launcher (`com.fares.glass`) e Projectivy Launcher a partir dos repositórios oficiais dos desenvolvedores; tenta definir HOME, pede teste do botão do controle e só oferece desativar o launcher anterior depois da confirmação. A desativação é reversível.
-- Abre a página oficial do Google Play para instalar Downloader by AFTVnews; a instalação final é confirmada pelo usuário na loja.
+- Abre a página oficial do Google Play para instalar Downloader by AFTVnews; se a Play Store estiver desativada, pode reativá-la temporariamente com autorização e restaurar o estado anterior depois. A instalação final é confirmada pelo usuário na loja.
 - Inclui limpeza de cache pelo Package Manager e fechamento opcional de apps de usuário pesados, sem forçar parada de componentes do sistema.
 - Preserva a integração Gemini: a página injeta a chave e o IP no arquivo Python baixado; o agente usa o Gemini como apoio, sem executar comandos arbitrários retornados pelo modelo.
 
