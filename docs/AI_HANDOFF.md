@@ -85,3 +85,14 @@ Manter uma página React que gera um agente Python/ADB personalizado para TV Box
 
 - 2026-11-13: agente v8, rollback, relatório HTML/JSON e CI aprovados em `main`.
 - 2026-11-13: branch `codex/speedtvbox-guided-experience` com agente v9, menu guiado, instaladores oficiais, gerenciamento de launcher com confirmação e rollback, RAM/armazenamento e tutoriais atualizados; aguardando CI e teste em hardware.
+
+
+## Correção do gerador web — v10 (2026-11-13)
+
+- A página agora resolve o asset do agente com `import.meta.env.BASE_URL`, desabilita cache no fetch e valida a presença dos marcadores `DISPOSITIVO_PADRAO` e `API_KEY_PADRAO` antes de personalizar.
+- O acesso ao `localStorage` é opcional e protegido por `try/catch`; navegação privada ou armazenamento bloqueado não pode impedir a geração.
+- A geração do arquivo e o salvamento foram separados: primeiro cria Blob URL, depois mostra um link `<a download>` para o usuário tocar diretamente. Isso evita depender de download programático disparado após `await` no navegador móvel.
+- O cálculo SHA-256 é auxiliar e não pode bloquear a geração se Web Crypto falhar.
+- Erros exibem a causa retornada e a página informa que a chave fica no arquivo gerado, sem ser enviada ao servidor pelo gerador.
+- O gerador web é v10; o agente Python continua v9. Nenhuma mudança foi feita na integração Gemini nem na injeção do IP.
+- Vercel check para o commit da correção reportou sucesso. Ainda falta validar o fluxo em aparelho Android físico com a conta do usuário.

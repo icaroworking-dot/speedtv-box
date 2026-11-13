@@ -1,6 +1,6 @@
 # SpeedTV Box
 
-Página que monta o agente de TV Box. A pessoa informa o IP da TV Box e a chave do Gemini; o arquivo `speedtvbox.py` baixado já recebe os dois valores. **A chave não é gravada no repositório.** O navegador só a mantém entre visitas se a opção “Lembrar a chave neste navegador” estiver marcada.
+Página que monta o agente de TV Box. A pessoa informa o IP da TV Box e a chave do Gemini; o arquivo `speedtvbox.py` é personalizado no próprio navegador. **A chave não é enviada ao servidor nem gravada no repositório.** O navegador só a mantém entre visitas se a opção “Lembrar a chave neste navegador” estiver marcada. O arquivo gerado contém a chave: não o publique nem compartilhe.
 
 ## Usar no Android / Termux
 
@@ -13,7 +13,7 @@ pkg install python android-tools
 termux-setup-storage
 ```
 
-3. Baixe o `speedtvbox.py` personalizado na página e permita o acesso aos arquivos.
+3. Na página, toque em **Gerar .py** e depois no link **Salvar .py**. Permita o acesso aos arquivos.
 4. Rode o bloco abaixo no Termux:
 
 ```bash
@@ -62,4 +62,4 @@ python public/speedtvbox.py selftest
 
 ## Publicação
 
-A página pode ser publicada pela Vercel ligada ao repositório. O download do agente é servido por `public/speedtvbox.py`. Quem já baixou um agente precisa baixar novamente para receber as correções.
+A página pode ser publicada pela Vercel ligada ao repositório. O agente é servido por `public/speedtvbox.py`. O gerador valida o conteúdo recebido, não depende de `localStorage` para funcionar e entrega um link real de salvamento após personalizar o arquivo. Quem já baixou um agente precisa gerar e salvar novamente para receber as correções.
