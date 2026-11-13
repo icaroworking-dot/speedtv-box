@@ -2078,8 +2078,7 @@ def ajustar_rede(adb, sim=False):
     titulo("Rede")
     conectar_ou_explicar(adb)
     journal = carregar_journal()
-    say("Wi-Fi dorme com a tela? Vou pedir política 'nunca' (wifi_sleep_policy=2).")
-    say("DNS privado: se estiver desligado, aponto para dns.google. Se você já escolheu um, eu não troco.")
+    say("Vou aplicar apenas os ajustes gerais reversíveis. Não altero o DNS, o Bluetooth ou a política de sono do Wi-Fi.")
     if not perguntar("Aplicar?", True, True if sim else None):
         return
     onda_ajustes(adb, journal, ram_mb=99999, video=False)
@@ -2089,7 +2088,7 @@ def ajustar_rede(adb, sim=False):
     if perguntar("Desligar a checagem de portal cativo?", False, False if sim else None):
         ok, msg = setting_put(adb, journal, "global", "captive_portal_mode", "0")
         say(msg if ok else "não apliquei: " + msg)
-    say("Feito. Reverter desfaz o DNS e o sono do Wi-Fi se o SpeedTV Box tiver mudado.")
+    say("Feito. O DNS e as opções de rádio permaneceram como estavam.")
 
 
 def forcar_1080(adb, sim=False):
@@ -2458,9 +2457,10 @@ def playstore(adb, sim=False):
 
     tags3 = classificar_log(tenta.get("log", ""))
     if "ssl_hora" in tags3 or "rede" in tags3:
-        say("Log cheira a certificado ou rede. Forçando DNS dns.google.")
-        setting_put(adb, journal, "global", "private_dns_mode", "hostname")
-        setting_put(adb, journal, "global", "private_dns_specifier", "dns.google")
+        say("O log sugere problema de certificado ou rede. O DNS privado pode ser testado, mas muda a configuração de rede.")
+        if perguntar("Trocar o DNS privado para dns.google agora?", False, False if sim else None):
+            setting_put(adb, journal, "global", "private_dns_mode", "hostname")
+            setting_put(adb, journal, "global", "private_dns_specifier", "dns.google")
 
     say("")
     say("8) Reinício e teste de novo. Várias falhas de GMS só assentam depois do boot.")
