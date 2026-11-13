@@ -3183,6 +3183,10 @@ def diagnostico(adb):
     else:
         say("Risco: nenhum nome da lista conhecida.")
     say("Para o detalhe de boot e RAM por app, a opção Ferramentas ainda tem o boot.")
+    visual = gerar_relatorio_visual(rel, rel, [], achar_lixo(rel.get("pacotes_instalados") or []))
+    if visual:
+        say("Relatório HTML desta auditoria: %s" % visual.get("html"))
+        say("Dados completos: %s" % visual.get("json"))
     return rel
 
 
