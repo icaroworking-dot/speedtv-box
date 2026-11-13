@@ -234,15 +234,25 @@ async function shaCurto(texto: string): Promise<string> {
     .slice(0, 16);
 }
 
+function formatarIp(valor: string): string {
+  const digitos = valor.replace(/\D/g, "").slice(0, 12);
+  return (digitos.match(/.{1,3}/g) || []).join(".");
+}
+
+function normalizarChave(valor: string): string {
+  // Chaves Gemini não contêm espaços; remove espaços/quebras vindos da cópia.
+  return valor.replace(/\s+/g, "");
+}
+
 function personalizar(texto: string, ip: string, api: string): string {
   let alvo = ip.trim();
   const octetos = alvo.split(".");
   const ipValido = octetos.length === 4 && octetos.every((parte) => /^\d{1,3}$/.test(parte) && Number(parte) >= 0 && Number(parte) <= 255);
   if (!ipValido) throw new Error("Informe um endereço IPv4 válido da TV Box.");
   alvo += ":5555";
-  const chave = api.trim();
+  const chave = normalizarChave(api);
   if (!/^[A-Za-z0-9_-]{20,256}$/.test(chave)) {
-    throw new Error("Cole a chave do Gemini, numa linha só.");
+    throw new Error("A chave do Gemini não parece válida. Cole a chave completa copiada do Google AI Studio; espaços e quebras de linha serão corrigidos automaticamente.");
   }
   const comIp = texto.replace(/DISPOSITIVO_PADRAO = "[^"]*"/, `DISPOSITIVO_PADRAO = "${alvo}"`);
   const pronto = comIp.replace(/API_KEY_PADRAO = "[^"]*"/, `API_KEY_PADRAO = "${chave}"`);
@@ -289,7 +299,7 @@ export function Console() {
       // Armazenamento bloqueado não pode impedir o uso do gerador.
     }
     if (apiSalva) {
-      setApi(apiSalva);
+      setApi(normalizarChave(apiSalva));
       setLembrarChave(true);
     }
     lerAgente()
@@ -298,7 +308,7 @@ export function Console() {
         setCodigo(texto);
         if (!apiSalva) {
           const achado = texto.match(/API_KEY_PADRAO = "([^"]+)"/);
-          if (achado) setApi(achado[1]);
+          if (achado) setApi(normalizarChave(achado[1]));
         }
         shaCurto(texto).then(setHash).catch(() => setHash("não disponível"));
       })
@@ -315,7 +325,7 @@ export function Console() {
       if (!codigo) throw new Error("O agente ainda está carregando. Aguarde alguns segundos e tente novamente.");
       const pronto = personalizar(codigo, ip, api);
       try {
-        if (lembrarChave) localStorage.setItem("speedtv-api", api.trim());
+        if (lembrarChave) localStorage.setItem("speedtv-api", normalizarChave(api));
         else {
           localStorage.removeItem("speedtv-api");
           localStorage.removeItem("nexo-api");
@@ -390,28 +400,38 @@ export function Console() {
             IP da TV Box (sem porta)
             <input
               id="nexo-ip"
+              type="text"
+              inputMode="numeric"
               value={ip}
-              onChange={(e) => setIp(e.target.value)}
-              placeholder="Digite o IP da TV Box"
+              onChange={(e) => setIp(formatarIp(e.target.value))}
+              placeholder="192.168.1.xx"
+              maxLength={15}
               autoComplete="off"
               spellCheck={false}
               suppressHydrationWarning
+              aria-describedby="nexo-ip-help"
               className="mt-1 w-full rounded-xl border border-line bg-bg-raised px-3 py-3 font-mono text-base text-fg"
             />
+            <span id="nexo-ip-help" className="mt-1 block text-xs text-faint">
+              Digite apenas os números. Os pontos são inseridos automaticamente; não inclua :5555.
+            </span>
           </label>
           <label className="mt-3 block text-sm text-muted" htmlFor="nexo-api">
             Chave do Gemini
             <input
               id="nexo-api"
               type="password"
-              placeholder="cole a chave do Gemini"
+              placeholder="Cole a chave do Gemini"
               value={api}
-              onChange={(e) => setApi(e.target.value)}
+              onChange={(e) => setApi(normalizarChave(e.target.value))}
               autoComplete="off"
               spellCheck={false}
               suppressHydrationWarning
               className="mt-1 w-full rounded-xl border border-line bg-bg-raised px-3 py-3 font-mono text-sm text-fg"
             />
+            <span className="mt-1 block text-xs text-faint">
+              Pode colar a chave diretamente, mesmo que venha com espaços ou quebras de linha.
+            </span>
           </label>
           <label className="mt-3 flex items-center gap-2 text-sm text-muted">
             <input type="checkbox" checked={lembrarChave} onChange={(e) => setLembrarChave(e.target.checked)} />
