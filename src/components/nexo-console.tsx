@@ -235,8 +235,34 @@ async function shaCurto(texto: string): Promise<string> {
 }
 
 function formatarIp(valor: string): string {
-  const digitos = valor.replace(/\D/g, "").slice(0, 12);
-  return (digitos.match(/.{1,3}/g) || []).join(".");
+  // Aceita pontos digitados/colados e também separa automaticamente
+  // quando o usuário passa de 3 dígitos no mesmo octeto.
+  const entrada = valor.replace(/[^0-9.]/g, "");
+  const grupos: string[] = [];
+  let atual = "";
+  let totalDigitos = 0;
+
+  for (const caractere of entrada) {
+    if (caractere === ".") {
+      if (atual && grupos.length < 3) {
+        grupos.push(atual);
+        atual = "";
+      }
+      continue;
+    }
+    if (totalDigitos >= 12 || grupos.length >= 4) break;
+    if (atual.length === 3) {
+      grupos.push(atual);
+      atual = "";
+      if (grupos.length >= 4) break;
+    }
+    atual += caractere;
+    totalDigitos += 1;
+  }
+
+  const terminaComPonto = entrada.endsWith(".") && atual === "" && grupos.length < 4;
+  if (atual || grupos.length === 0) grupos.push(atual);
+  return grupos.slice(0, 4).join(".") + (terminaComPonto ? "." : "");
 }
 
 function normalizarChave(valor: string): string {
@@ -401,7 +427,7 @@ export function Console() {
             <input
               id="nexo-ip"
               type="text"
-              inputMode="numeric"
+              inputMode="text"
               value={ip}
               onChange={(e) => setIp(formatarIp(e.target.value))}
               placeholder="192.168.1.xx"
@@ -413,7 +439,7 @@ export function Console() {
               className="mt-1 w-full rounded-xl border border-line bg-bg-raised px-3 py-3 font-mono text-base text-fg"
             />
             <span id="nexo-ip-help" className="mt-1 block text-xs text-faint">
-              Digite apenas os números. Os pontos são inseridos automaticamente; não inclua :5555.
+              Você pode digitar os pontos manualmente ou deixar o campo inserir ao passar de 3 números. Cada bloco aceita até 3 dígitos; não inclua :5555.
             </span>
           </label>
           <label className="mt-3 block text-sm text-muted" htmlFor="nexo-api">
