@@ -48,17 +48,18 @@ const MEDIDAS = [
 ];
 
 const COMANDOS = [
-  ["python speedtvbox.py", "abre o menu. Na primeira vez, escolha 1"],
-  ["python speedtvbox.py primeira", "o mesmo caminho, sem abrir o menu"],
-  ["python speedtvbox.py playstore", "só o reparo da loja"],
-  ["python speedtvbox.py reverter", "desfaz o que o SpeedTV Box mudou"],
+  ["python speedtvbox.py", "abre o assistente guiado. Escolha 1 para a primeira otimização"],
+  ["python speedtvbox.py primeira", "inicia diretamente a auditoria e otimização guiada"],
+  ["python speedtvbox.py playstore", "abre somente o reparo da loja"],
+  ["python speedtvbox.py reverter", "restaura alterações reversíveis feitas pelo agente"],
 ];
 
-const BLOCO_TERMUX = `f=$(find "$HOME/storage/downloads" "$HOME/storage/shared/Download" "$HOME/storage/shared/Downloads" -iname 'speedtvbox.py*' 2>/dev/null | head -n 1)
-echo "Achei: \${f:-nada}"
-cp "$f" "$HOME/speedtvbox.py"
-cd "$HOME"
-python speedtvbox.py`;
+const BLOCO_TERMUX = \`f=$(find "$HOME/storage/downloads" "$HOME/storage/shared/Download" "$HOME/storage/shared/Downloads" -iname 'speedtvbox.py*' 2>/dev/null | head -n 1)
+if [ -z "$f" ]; then echo "Não achei speedtvbox.py na pasta Download. Baixe o arquivo primeiro."; exit 1; fi
+echo "Agente encontrado: $f"
+cp "$f" "$HOME/speedtvbox.py" || exit 1
+cd "$HOME" || exit 1
+python speedtvbox.py\`;
 
 const PASSOS = [
   {
@@ -159,11 +160,22 @@ python speedtvbox.py`}</pre>
         </article>
       </section>
 
+      <section className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+        <p className="font-mono text-xs tracking-widest text-amber">NOVO · INSTALADOR</p>
+        <h2 className="mt-2 font-display text-3xl text-fg">Aplicativos e tela inicial</h2>
+        <p className="mt-3 text-sm leading-relaxed text-muted">
+          No agente Python, abra “Instalar aplicativos ou trocar a tela inicial”. O Downloader abre a página oficial do Google Play para você instalar. Glass Launcher e Projectivy são baixados dos canais oficiais dos desenvolvedores e instalados pelo ADB.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-muted">
+          Depois de instalar um launcher, o agente tenta defini-lo como tela inicial, pede que você teste o botão HOME do controle e só então oferece desativar o launcher antigo. Ele não apaga o APK original da partição do sistema; deixa a desativação reversível e inclui a recuperação no menu.
+        </p>
+      </section>
+
       <section className="rounded-2xl border border-line bg-bg-raised p-5 sm:p-6">
-        <h2 className="font-display text-3xl text-fg">O que a opção 1 faz</h2>
+        <h2 className="font-display text-3xl text-fg">O que acontece quando você escolhe 1</h2>
         <ol className="mt-4 space-y-3 text-sm leading-relaxed text-muted">
           <li>
-            <span className="text-fg">Lê, sem desativar.</span> RAM verdadeira contra a da etiqueta, Android da tela Sobre contra o kernel, Widevine, pacotes, app escondido e nome de vírus.
+            <span className="text-fg">Lê, sem desativar.</span> RAM verdadeira contra a da etiqueta, Android da tela Sobre contra o kernel, armazenamento, processos, Widevine, pacotes, apps de inicialização e indicadores conhecidos de ameaça.
           </li>
           <li>
             <span className="text-fg">Pergunta do risco.</span> Adups e o backdoor XCPE (com.oemservice) são desativados se você disser sim. Não são apagados: a firmware reporia o arquivo.
@@ -172,10 +184,10 @@ python speedtvbox.py`}</pre>
             <span className="text-fg">Pergunta do que veio de fábrica.</span> Netflix, Kodi, Prime, Disney, Globoplay. YouTube da TV fica. Play Store, GMS, WebView, launcher, teclado, HDMI e codec não entram.
           </li>
           <li>
-            <span className="text-fg">Limpa em ondas.</span> Calendário, telefone, mapa, impressão e telemetria. Reinicia. Se a tela inicial, a loja ou o SystemUI quebrarem, desfaz a onda.
+            <span className="text-fg">Limpa em ondas.</span> Perfis conhecidos de telemetria, anúncios, apps de telefone, mapas, recomendações e utilitários de fábrica, além dos grupos opcionais. Mede e reinicia entre etapas; se a tela inicial, a loja ou o SystemUI falharem, desfaz a onda que causou o problema.
           </li>
           <li>
-            <span className="text-fg">Relatório.</span> Abra o app Arquivos, pasta Download, pasta SpeedTV. Em português: aplicativos antes e depois, o que foi desligado, RAM de vitrine contra a real, Android de vitrine contra o kernel, Widevine.
+            <span className="text-fg">Relatório.</span> Abra o app Arquivos, pasta Download, pasta SpeedTV. Você verá aplicativos antes e depois, o que foi desativado, RAM disponível, armazenamento, processos, Android, Widevine e gráficos por etapa.
           </li>
         </ol>
       </section>
@@ -317,7 +329,7 @@ export function Console() {
           <h1 className="font-display text-5xl leading-none text-fg sm:text-6xl">SpeedTV Box</h1>
         </div>
         <p className="max-w-xs text-sm text-muted">
-          Versão 8. A memória disponível considera MemAvailable ou livre + cache nos kernels antigos. O relatório e a sessão ficam em Download/SpeedTV.
+          Versão 9. Assistente guiado, auditoria, limpeza por etapas, instalador de launchers e relatórios em Download/SpeedTV.
         </p>
       </header>
 
@@ -432,7 +444,7 @@ export function Console() {
           >
             Copiar comandos
           </button>
-          <p className="mt-3 text-sm text-muted">Na primeira vez, escolha 1. O reset está na aba Tutorial.</p>
+          <p className="mt-3 text-sm text-muted">Na primeira vez, escolha 1. Depois use as opções por finalidade: memória, armazenamento, instaladores, segurança e recuperação.</p>
         </aside>
       </section>
 
@@ -444,7 +456,7 @@ export function Console() {
           </div>
           <h2 className="mt-2 font-display text-4xl leading-none">Limpeza que mede</h2>
           <p className="mt-3 text-sm leading-relaxed text-muted">
-            Desativa para o usuário, reinicia, espera o boot e confere SystemUI, Ajustes, a mesma tela inicial e a Play Store ainda ligada. Se a onda não passar, ela é desfeita e as anteriores ficam. Nada é apagado de /system — o reset físico continua valendo.
+            Faz uma limpeza mais completa com perfis conhecidos por fabricante e por função, mede antes/depois, reinicia e confere SystemUI, Ajustes, tela inicial e Play Store. Apps desconhecidos não são removidos às cegas. Se uma onda falhar, ela é desfeita.
           </p>
         </article>
         <article className="rounded-2xl border border-line bg-surface p-5">
@@ -505,7 +517,7 @@ export function Console() {
           </div>
           <ul className="mt-3 space-y-2 text-sm text-muted">
             <li>Não existe `pm uninstall` de sistema neste agente.</li>
-            <li>App que você instalou não entra na onda. Spyware de nome conhecido pede confirmação.</li>
+            <li>Apps instalados por você não entram na limpeza automática. A lista de fábrica foi ampliada com nomes exatos já conhecidos, incluindo Pluto TV e VLC quando presentes; cada grupo opcional pede confirmação.</li>
             <li>Launcher atual, teclado atual e entrada HDMI são protegidos na hora, não só por lista.</li>
             <li>Widevine: nunca apaga a biblioteca. Esconde com root e o reverter devolve.</li>
             <li>Os relatórios vão para Download/SpeedTV, a pasta que abre no app Arquivos.</li>
