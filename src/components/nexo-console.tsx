@@ -144,14 +144,14 @@ function Tutorial() {
       <section className="grid gap-4 lg:grid-cols-2">
         <article className="rounded-2xl border border-line bg-surface p-5">
           <h3 className="font-display text-2xl text-fg">No Termux</h3>
-          <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-fg">{BLOCO_TERMUX}</pre>
+          <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-fg">{BLOCO_TERMUX}</pre>
           <p className="mt-3 text-sm leading-relaxed text-muted">
             Cole o bloco inteiro de uma vez. O Termux aceita várias linhas juntas. Ele mesmo acha o arquivo na pasta Download do celular. Se aparecer Achei: nada, o download não caiu nessa pasta.
           </p>
         </article>
         <article className="rounded-2xl border border-line bg-surface p-5">
           <h3 className="font-display text-2xl text-fg">No computador</h3>
-          <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-fg">{`adb connect 192.168.1.88:5555
+          <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-fg">{`adb connect 192.168.1.88:5555
 python speedtvbox.py`}</pre>
           <p className="mt-3 text-sm leading-relaxed text-muted">
             Troque o IP pelo da caixa. Rode na pasta onde estão o platform-tools e o arquivo baixado. Se o comando adb não existir, entre na pasta do platform-tools.
@@ -402,7 +402,7 @@ export function Console() {
         <aside className="rounded-2xl border border-line bg-bg-raised p-5">
           <p className="font-display text-2xl text-fg">No Termux</p>
           <p className="mt-3 text-sm text-muted">Baixe o .py. Cole isto inteiro, de uma vez:</p>
-          <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-fg">{BLOCO_TERMUX}</pre>
+          <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-fg">{BLOCO_TERMUX}</pre>
           <button
             type="button"
             className="mt-3 inline-flex min-h-11 items-center rounded-xl border border-line px-4 text-sm text-fg"
