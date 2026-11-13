@@ -44,7 +44,8 @@ Manter uma página React que gera um agente Python/ADB personalizado para TV Box
 ### Documentação e validação
 
 - README reescrito para refletir a versão 8 e as medidas de segurança.
-- Workflow de CI valida compilação Python e executa `selftest`.
+- Workflow de CI executa compilação Python, `selftest` (incluindo geração HTML/JSON), TypeScript, ESLint e build Vite.
+- O `package-lock.json` foi sincronizado com `package.json` durante a validação automatizada.
 
 ## Regras de segurança
 
@@ -60,9 +61,8 @@ Manter uma página React que gera um agente Python/ADB personalizado para TV Box
 
 ## Testes e status
 
-- Workflow adicionado para executar `python -m py_compile public/speedtvbox.py` e `python public/speedtvbox.py selftest`.
-- **Não declarar testes aprovados até conferir o resultado do GitHub Actions.**
-- Ainda falta executar typecheck/build/lint da página React em CI.
+- **Aprovados no GitHub Actions (run 8):** `python -m py_compile`, `python public/speedtvbox.py selftest` (incluindo geração HTML/JSON), `npm run typecheck`, `npm run lint` e `npm run build:dev`.
+- O primeiro CI encontrou o `package-lock.json` fora de sincronia com `package.json`; a instalação foi corrigida e o lockfile foi atualizado na branch.
 - Ainda falta validar o relatório HTML em um Android/Termux real e testar rollback em ao menos um Android TV 10/11 e um Android TV 12+.
 - Ainda falta testar os comandos de Package Manager em ROMs Amlogic, Rockchip e Allwinner; diferenças de fabricante podem existir.
 - O agente ainda precisa de testes unitários com ADB simulado para rollback, pacotes ausentes e respostas de `pm` não padronizadas.
