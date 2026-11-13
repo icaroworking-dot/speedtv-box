@@ -277,7 +277,7 @@ function personalizar(texto: string, ip: string, api: string): string {
   if (!ipValido) throw new Error("Informe um endereço IPv4 válido da TV Box.");
   alvo += ":5555";
   const chave = normalizarChave(api);
-  if (!/^[A-Za-z0-9_-]{20,256}$/.test(chave)) {
+  if (!/^[A-Za-z0-9._-]{20,256}$/.test(chave)) {
     throw new Error("A chave do Gemini não parece válida. Cole a chave completa copiada do Google AI Studio; espaços e quebras de linha serão corrigidos automaticamente.");
   }
   const comIp = texto.replace(/DISPOSITIVO_PADRAO = "[^"]*"/, `DISPOSITIVO_PADRAO = "${alvo}"`);
