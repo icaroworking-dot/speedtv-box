@@ -3308,7 +3308,7 @@ def ler_diagnosticos_operacionais(pasta):
 
 
 def gerar_relatorio_visual(antes, depois, desligados, lixo):
-    """Gera um relatório HTML offline e JSON com inventário e métricas por etapa."""
+    """Gera relatório HTML offline, visual e detalhado, isolado na sessão atual."""
     pasta = pasta_sessao()
     metricas = []
     arquivo_metricas = pasta / "08 - Metricas.jsonl"
@@ -3323,116 +3323,285 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
                     continue
         except Exception:
             pass
-    # O relatório representa a execução mais recente, não mistura medições antigas.
-    inicios = [i for i, item in enumerate(metricas) if item.get("etiqueta") == "antes"]
-    if inicios:
-        metricas = metricas[inicios[-1]:]
 
+    def esc(valor):
+        return html.escape(str(valor if valor is not None else "—"))
+
+    def fmt_kb(valor):
+        return kb_mb(valor) if isinstance(valor, (int, float)) else "—"
+
+    def card(rotulo, valor, detalhe="", icone=""):
+        return (
+            '<article class="metric"><div class="metric-top"><span>%s</span><i>%s</i></div>'
+            '<strong>%s</strong><small>%s</small></article>'
+            % (esc(rotulo), esc(icone), esc(valor), esc(detalhe))
+        )
+
+    def kv(rotulo, valor):
+        return '<div class="kv"><span>%s</span><b>%s</b></div>' % (esc(rotulo), esc(valor))
+
+    def grafico(titulo_grafico, chave, unidade="", explicacao=""):
+        valores = []
+        for item in metricas:
+            valor = item.get(chave)
+            if isinstance(valor, (int, float)):
+                valores.append((item.get("etiqueta") or "Etapa", valor))
+        if not valores:
+            return '<section class="panel"><div class="section-head"><div><p class="eyebrow">DESEMPENHO</p><h2>%s</h2></div></div><p class="muted">Não houve amostras suficientes nesta sessão.</p></section>' % esc(titulo_grafico)
+        maximo = max([v for _, v in valores] + [1])
+        barras = []
+        for nome, valor in valores:
+            largura = max(1, min(100, int((valor / maximo) * 100)))
+            barras.append(
+                '<div class="barrow"><div class="barlabel">%s</div><div class="track"><i style="width:%d%%"></i></div><b>%s%s</b></div>'
+                % (esc(nome), largura, esc(round(valor, 1)), esc(unidade))
+            )
+        return (
+            '<section class="panel"><div class="section-head"><div><p class="eyebrow">DESEMPENHO</p>'
+            '<h2>%s</h2><p class="muted">%s</p></div></div><div class="chart">%s</div></section>'
+            % (esc(titulo_grafico), esc(explicacao), "".join(barras))
+        )
+
+    inicio = metricas[0] if metricas else {}
+    fim = metricas[-1] if metricas else {}
+    ram_antes_kb = antes.get("ram_usavel_kb") or antes.get("ram_disponivel_kb")
+    ram_depois_kb = (depois or {}).get("ram_usavel_kb") or (depois or {}).get("ram_disponivel_kb")
+    ram_delta = (ram_depois_kb - ram_antes_kb) if isinstance(ram_antes_kb, (int, float)) and isinstance(ram_depois_kb, (int, float)) else None
+    ram_delta_txt = ("%s%s" % ("+" if ram_delta >= 0 else "", fmt_kb(ram_delta))) if ram_delta is not None else "sem comparação"
+    pacote_delta = (depois or {}).get("pacotes", antes.get("pacotes"))
+    root_txt = "Disponível" if antes.get("root") else "Não disponível"
+    android_info = antes.get("android") or {}
+    sec = antes.get("seguranca_sistema") or {}
+    zram = antes.get("zram") or {}
+    arm = antes.get("armazenamento") or {}
+    cpu_freq = antes.get("cpu_freq") or {}
+    temperaturas = antes.get("temperaturas") or []
+    display = antes.get("display_size") or "Não informado"
+    density = antes.get("display_density") or "Não informado"
+
+    alertas = []
+    if antes.get("ram_mentira"):
+        alertas.append("Divergência entre RAM anunciada e RAM utilizável.")
+    if antes.get("ruins"):
+        alertas.append("Foram encontrados nomes de pacotes presentes na lista de indicadores conhecidos.")
+    if antes.get("init_suspeito"):
+        alertas.append("Há nomes de scripts de inicialização que merecem análise manual.")
+    if antes.get("portas_estranhas"):
+        alertas.append("Há portas de rede que não foram classificadas como comuns.")
+    if antes.get("permissoes"):
+        alertas.append("Aplicativos de terceiros possuem permissões sensíveis.")
+    if android_info.get("mentira"):
+        alertas.append("A versão Android declarada diverge da família indicada pelo SDK.")
+    try:
+        uso = int(str(arm.get("uso") or "0").replace("%", ""))
+        if uso >= 90:
+            alertas.append("O armazenamento de dados está quase cheio.")
+    except ValueError:
+        pass
+    if alertas:
+        status = "Atenção necessária"
+        status_class = "warn"
+        status_copy = "A auditoria encontrou pontos que merecem revisão. Veja os detalhes e as ações registradas abaixo."
+    else:
+        status = "Sem alertas conhecidos"
+        status_class = "good"
+        status_copy = "Não foram encontrados indicadores relevantes nas verificações executadas. Isso não certifica a firmware nem substitui testes de uso."
+
+    data_rows = []
+    for item in metricas:
+        data_rows.append(
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                esc(item.get("etiqueta")),
+                esc(fmt_kb(item.get("mem_available_kb"))),
+                esc(item.get("processos")),
+                esc(item.get("desativados")),
+                esc(fmt_kb(item.get("data_livre_kb"))),
+            )
+        )
+    if not data_rows:
+        data_rows.append("<tr><td colspan='5'>Sem métricas coletadas nesta sessão.</td></tr>")
+
+    disabled_items = "".join("<li>%s</li>" % esc(pkg) for pkg in (desligados or []))
+    if not disabled_items:
+        disabled_items = "<li>Nenhum pacote foi desativado nesta sessão.</li>"
+    factory_items = "".join(
+        "<li><b>%s</b><small>%s</small></li>" % (esc(nome), esc(pkg))
+        for pkg, nome in (lixo or [])
+    ) or "<li>Nenhum item conhecido da lista de aplicativos de fábrica foi encontrado.</li>"
+
+    diagnostics = []
+    for item in ler_diagnosticos_operacionais(pasta):
+        tipo = item.get("tipo") or "Diagnóstico"
+        diagnostics.append(
+            '<article class="diagnostic"><div class="diag-icon">✓</div><div><b>%s</b><p>%s</p><small>%s</small></div></article>'
+            % (esc(tipo), esc(item.get("resumo")), esc(item.get("quando")))
+        )
+    diagnostics_html = "".join(diagnostics) or '<p class="muted">Nenhum diagnóstico adicional foi executado nesta sessão.</p>'
+
+    security_rows = [
+        kv("SELinux", sec.get("selinux")),
+        kv("Verified Boot", sec.get("verified_boot")),
+        kv("Bloqueio do bootloader", sec.get("bootloader_locked")),
+        kv("Estado vbmeta", sec.get("vbmeta_state")),
+        kv("Criptografia", sec.get("crypto_state")),
+        kv("Tipo de build", sec.get("build_type")),
+        kv("Modo debug", sec.get("debuggable")),
+        kv("Depuração ADB", sec.get("adb_enabled")),
+    ]
+    cpu_rows = [
+        kv("Processador", antes.get("cpu")),
+        kv("Núcleos detectados", antes.get("nucleos")),
+        kv("Frequência atual", ("%s MHz" % round(cpu_freq["atual_khz"] / 1000, 0)) if cpu_freq.get("atual_khz") else "Não exposta"),
+        kv("Frequência máxima", ("%s MHz" % round(cpu_freq["max_khz"] / 1000, 0)) if cpu_freq.get("max_khz") else "Não exposta"),
+        kv("GPU / OpenGL", (antes.get("gpu") or {}).get("gles") or (antes.get("gpu") or {}).get("egl")),
+        kv("Temperaturas lidas", ", ".join("%s: %s °C" % (t.get("zona"), t.get("celsius")) for t in temperaturas) if temperaturas else "Não expostas pelo firmware"),
+    ]
+    device_rows = [
+        kv("Fabricante / modelo", "%s %s" % (antes.get("marca") or "—", antes.get("modelo") or "—")),
+        kv("SoC / placa", antes.get("plataforma")),
+        kv("Android / SDK", "%s / %s" % (antes.get("release") or "—", antes.get("sdk") or "—")),
+        kv("Patch de segurança", antes.get("patch")),
+        kv("Kernel", antes.get("kernel")),
+        kv("Arquitetura", antes.get("abi")),
+        kv("Resolução reportada", display),
+        kv("Densidade", density),
+        kv("Widevine", antes.get("widevine")),
+        kv("Acesso root", root_txt),
+        kv("Tempo ligado", ("%d min" % (antes.get("uptime_s") // 60)) if antes.get("uptime_s") else "Não informado"),
+        kv("Tempo de boot", ("%.1f s" % (antes.get("boot_ms") / 1000.0)) if antes.get("boot_ms") else "Não medido"),
+    ]
+
+    summary_alerts = "".join("<li>%s</li>" % esc(a) for a in alertas) or "<li>Nenhum indicador conhecido foi sinalizado nas verificações realizadas.</li>"
+    recommendations = []
+    if not antes.get("root"):
+        recommendations.append("Sem root: as operações ficam limitadas às permissões normais do ADB. O agente não tentará forçar acesso administrativo.")
+    else:
+        recommendations.append("Root confirmado: ferramentas avançadas podem ser oferecidas quando forem compatíveis e justificadas.")
+    if not antes.get("ram_real_mb"):
+        recommendations.append("A RAM física não pôde ser confirmada por fontes suficientes; trate a estimativa com cautela.")
+    if not metricas:
+        recommendations.append("Não há histórico de métricas por etapa; execute uma auditoria/debloat guiado para comparar antes e depois.")
+    if not alertas:
+        recommendations.append("Nenhuma alteração corretiva é indicada apenas com base nos indicadores atuais. Não aplique ajustes sem necessidade.")
+    recommendations_html = "".join("<li>%s</li>" % esc(x) for x in recommendations)
+
+    sessao_nome = Path(pasta).name
+    dispositivo = "%s %s" % (antes.get("marca") or "TV Box", antes.get("modelo") or "")
+    json_path = pasta / "07 - Dados completos.json"
     dados = {
+        "produto": "SpeedTV Box",
+        "sessao": sessao_nome,
         "gerado_em": agora_iso(),
         "dispositivo": {
             "marca": antes.get("marca"), "modelo": antes.get("modelo"),
             "plataforma": antes.get("plataforma"), "abi": antes.get("abi"),
             "android": antes.get("release"), "sdk": antes.get("sdk"),
-            "kernel": antes.get("kernel"),
+            "kernel": antes.get("kernel"), "root": antes.get("root"),
+            "seguranca_sistema": sec, "cpu_freq": cpu_freq,
+            "temperaturas": temperaturas, "display_size": display,
+            "display_density": density, "gpu": antes.get("gpu"),
         },
         "antes": antes,
         "depois": depois,
         "desativados_nesta_sessao": desligados or [],
-        "apps_de_fabrica_detectados": [
-            {"pacote": pkg, "nome": nome} for pkg, nome in (lixo or [])
-        ],
+        "apps_de_fabrica_detectados": [{"pacote": pkg, "nome": nome} for pkg, nome in (lixo or [])],
         "metricas_por_etapa": metricas,
         "diagnosticos_operacionais": ler_diagnosticos_operacionais(pasta),
+        "alertas": alertas,
+        "recomendacoes": recommendations,
     }
-    json_path = pasta / "07 - Dados completos.json"
     json_path.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    def esc(valor):
-        return html.escape(str(valor if valor is not None else "—"))
-
-    def card(rotulo, valor, detalhe=""):
-        return '<article class="card"><small>%s</small><strong>%s</strong><span>%s</span></article>' % (
-            esc(rotulo), esc(valor), esc(detalhe)
-        )
-
-    def grafico(titulo_grafico, chave, unidade=""):
-        valores = []
-        for item in metricas:
-            valor = item.get(chave)
-            if isinstance(valor, (int, float)):
-                valores.append((item.get("etiqueta") or "etapa", valor))
-        if not valores:
-            return '<section class="panel"><h2>%s</h2><p>Sem amostras suficientes.</p></section>' % esc(titulo_grafico)
-        maximo = max([v for _, v in valores] + [1])
-        barras = []
-        for nome, valor in valores:
-            largura = max(2, min(100, int((valor / maximo) * 100)))
-            barras.append(
-                '<div class="barrow"><label>%s</label><div class="track"><i style="width:%d%%"></i></div><b>%s%s</b></div>'
-                % (esc(nome), largura, esc(round(valor, 1)), esc(unidade))
-            )
-        return '<section class="panel"><h2>%s</h2>%s</section>' % (esc(titulo_grafico), "".join(barras))
-
-    linhas = []
-    for item in metricas:
-        linhas.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-            esc(item.get("etiqueta")),
-            esc(kb_mb(item.get("mem_available_kb"))),
-            esc(item.get("processos")),
-            esc(item.get("desativados")),
-            esc(kb_mb(item.get("data_livre_kb"))),
-        ))
-    if not linhas:
-        linhas.append("<tr><td colspan='5'>Sem métricas coletadas.</td></tr>")
-    pacotes = "".join("<li>%s</li>" % esc(pkg) for pkg in (desligados or []))
-    if not pacotes:
-        pacotes = "<li>Nenhum pacote desativado nesta sessão.</li>"
-
-    dispositivo = "%s %s · %s · Android %s (SDK %s) · kernel %s" % (
-        antes.get("marca") or "Marca não identificada",
-        antes.get("modelo") or "",
-        antes.get("plataforma") or "SoC não identificado",
-        antes.get("release") or "?",
-        antes.get("sdk") or "?",
-        antes.get("kernel") or "?",
-    )
-    ram_antes = kb_mb(antes.get("ram_usavel_kb") or antes.get("ram_disponivel_kb"))
-    ram_depois = kb_mb((depois or {}).get("ram_usavel_kb") or (depois or {}).get("ram_disponivel_kb"))
     html_doc = """<!doctype html>
-<html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SpeedTV Box — Relatório</title>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark"><title>SpeedTV Box | Relatório técnico</title>
 <style>
-:root{color-scheme:dark;--bg:#07101f;--panel:#101d31;--line:#263852;--text:#eef5ff;--muted:#a8b8cf;--accent:#65d8f2}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0,#152b48,var(--bg) 45%);color:var(--text);font:15px system-ui,sans-serif;padding:24px}
-main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid var(--line)}h1{font-size:clamp(2rem,5vw,3.5rem);margin:5px 0}h2{font-size:1.15rem;margin:0 0 18px}p,small,span{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0}
-.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}.card small,.card strong,.card span{display:block}.card strong{font-size:1.65rem;margin:8px 0;color:var(--text)}.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:14px 0}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:12px 0;font-size:.85rem}.track{height:10px;background:#24354d;border-radius:99px;overflow:hidden}.track i{display:block;height:100%;background:linear-gradient(90deg,#3d9edb,var(--accent));border-radius:99px}.barrow b{text-align:right}.panel{margin:14px 0;overflow:auto}table{width:100%;border-collapse:collapse;font-size:.88rem}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:var(--accent)}ul{columns:2;overflow-wrap:anywhere}footer{padding:24px 0;color:var(--muted);font-size:.8rem}@media(max-width:600px){body{padding:14px}.barrow{grid-template-columns:90px 1fr 55px}ul{columns:1}}
-</style><main>
-<header><small>SPEEDTV BOX · AUDITORIA E DEBLOAT</small><h1>Relatório da TV Box</h1><p>Gerado em __DATE__</p><p>__DEVICE__</p></header>
+:root{color-scheme:dark;--bg:#070d19;--surface:#101a2b;--surface2:#142238;--line:#263a55;--text:#f2f6ff;--muted:#9eafc8;--gold:#f4bd4f;--cyan:#57d7e8;--green:#5cdaa2;--red:#ff7e78;--shadow:0 18px 48px #0005}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 10% -10%,#173653 0,transparent 38%),radial-gradient(ellipse at 100% 20%,#252044 0,transparent 30%),var(--bg);color:var(--text);font:15px/1.55 Inter,system-ui,-apple-system,Segoe UI,sans-serif;padding:26px 18px 60px}
+main{max-width:1180px;margin:auto}.hero{position:relative;overflow:hidden;padding:30px;border:1px solid #ffffff18;border-radius:28px;background:linear-gradient(125deg,#14263eeb,#0d1829ed 58%,#1c1c35);box-shadow:var(--shadow)}
+.hero:after{content:"";position:absolute;width:300px;height:300px;border-radius:50%;right:-110px;top:-150px;background:radial-gradient(circle,#5bd6e733,transparent 70%);pointer-events:none}
+.brand{display:flex;align-items:center;gap:13px}.logo{width:48px;height:48px;display:grid;place-items:center;border-radius:15px;background:linear-gradient(145deg,#f4bd4f,#e88d39);box-shadow:0 8px 24px #f4bd4f33}.logo svg{width:30px;height:30px}.brand b{letter-spacing:.16em;font-size:12px}.brand span{display:block;color:var(--muted);font-size:12px;letter-spacing:.05em}
+.hero-grid{display:grid;grid-template-columns:1fr auto;gap:20px;align-items:end;margin-top:32px}.eyebrow{font-size:10px;letter-spacing:.2em;font-weight:800;color:var(--cyan);margin:0 0 8px}.hero h1{font-size:clamp(30px,5vw,52px);letter-spacing:-.045em;line-height:1.02;margin:0;max-width:700px}.hero p{color:var(--muted);margin:12px 0 0}.session{font:12px ui-monospace,monospace;color:#d9e8ff;background:#ffffff0b;border:1px solid #ffffff19;padding:10px 13px;border-radius:12px;max-width:270px;overflow-wrap:anywhere}
+.status{display:flex;gap:12px;align-items:flex-start;margin:18px 0 22px;padding:18px 20px;border:1px solid var(--line);border-radius:18px;background:#101a2bcc}.status .dot{width:11px;height:11px;border-radius:50%;margin-top:6px;flex:none}.status.good{border-color:#3c947566}.status.good .dot{background:var(--green);box-shadow:0 0 15px #5cdaa288}.status.warn{border-color:#bd853b88}.status.warn .dot{background:var(--gold);box-shadow:0 0 15px #f4bd4f88}.status b{font-size:17px}.status p{margin:3px 0 0;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0 22px}.metric,.panel{background:linear-gradient(155deg,#142238,#0e1828);border:1px solid var(--line);border-radius:19px;box-shadow:0 10px 30px #0002}.metric{padding:17px;min-width:0}.metric-top{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px}.metric-top i{font-style:normal;color:var(--cyan);font-size:16px}.metric strong{display:block;font-size:clamp(20px,2.6vw,29px);line-height:1.15;margin:12px 0 5px;overflow-wrap:anywhere}.metric small{color:var(--muted);font-size:11px}
+.panel{padding:22px;margin:14px 0;overflow:hidden}.section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:15px;margin-bottom:16px}.section-head h2{font-size:21px;letter-spacing:-.02em;margin:0}.section-head p{margin:5px 0 0}.muted{color:var(--muted);font-size:13px}.section-index{font:11px ui-monospace,monospace;color:var(--gold)}
+.columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.kvgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}.kv{display:flex;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px solid #ffffff10;min-width:0}.kv span{color:var(--muted);font-size:13px}.kv b{font-size:13px;text-align:right;overflow-wrap:anywhere;max-width:58%}
+.barrow{display:grid;grid-template-columns:115px minmax(40px,1fr) 75px;gap:10px;align-items:center;margin:14px 0;font-size:12px}.barlabel{color:var(--muted);overflow-wrap:anywhere}.track{height:11px;border-radius:20px;background:#24344b;overflow:hidden}.track i{display:block;height:100%;border-radius:20px;background:linear-gradient(90deg,#3f9dd6,var(--cyan));box-shadow:0 0 14px #57d7e855}.barrow b{text-align:right;font:12px ui-monospace,monospace;color:#e8f2ff}
+.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:600px;font-size:13px}th{text-align:left;color:var(--cyan);font-size:10px;text-transform:uppercase;letter-spacing:.12em}td,th{padding:13px 12px;border-bottom:1px solid #ffffff12}tbody tr:hover{background:#ffffff06}
+.pill{display:inline-flex;padding:5px 9px;border-radius:99px;background:#ffffff0d;border:1px solid #ffffff17;color:#d8e8ff;font-size:11px}.pill.good{color:var(--green);border-color:#5cdaa244;background:#5cdaa20d}.pill.warn{color:var(--gold);border-color:#f4bd4f44;background:#f4bd4f0d}
+.list{margin:0;padding-left:19px}.list li{padding:6px 0;color:#d7e2f2}.list small{display:block;color:var(--muted);overflow-wrap:anywhere}.diagnostic{display:flex;gap:13px;padding:14px 0;border-bottom:1px solid #ffffff12}.diagnostic:last-child{border:0}.diag-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:#57d7e81a;color:var(--cyan);flex:none}.diagnostic p{margin:3px 0;color:var(--muted);font-size:13px}.diagnostic small{color:#8297b4;font-size:11px}
+.alert-list li::marker{color:var(--gold)}.recommend-list li::marker{color:var(--cyan)}
+details{border-top:1px solid #ffffff12;padding:13px 0}details summary{cursor:pointer;color:#dce8f7;font-weight:650}details pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080f1b;padding:14px;border-radius:12px;color:#a9bdd8;font-size:11px}
+.footer{display:flex;justify-content:space-between;gap:15px;flex-wrap:wrap;color:#8293ac;font-size:11px;padding:24px 5px}.footer b{color:#d9e6f7;letter-spacing:.12em}
+@media(max-width:850px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.columns{grid-template-columns:1fr}.hero-grid{grid-template-columns:1fr}.session{max-width:none}}
+@media(max-width:520px){body{padding:12px 10px 40px}.hero{padding:22px 18px;border-radius:20px}.grid{gap:8px}.metric{padding:13px}.metric strong{font-size:20px}.panel{padding:17px}.kvgrid{grid-template-columns:1fr}.barrow{grid-template-columns:88px minmax(30px,1fr) 62px;gap:7px}.brand b{font-size:11px}}
+@media print{body{background:#fff;color:#172235;padding:0}.hero,.metric,.panel{background:#fff;color:#172235;box-shadow:none;border:1px solid #ccd5e2;break-inside:avoid}.hero p,.muted,.kv span,.metric small,.footer{color:#56657a}.hero h1,.metric strong,.section-head h2,.kv b{color:#172235}.status{background:#fff}.grid{grid-template-columns:repeat(4,1fr)}.columns{grid-template-columns:repeat(2,1fr)}}
+</style></head><body><main>
+<header class="hero"><div class="brand"><div class="logo"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="3" y="5" width="26" height="18" rx="3" stroke="#172235" stroke-width="2.4"/><path d="M8 10h16M8 14h10M12 27h8" stroke="#172235" stroke-width="2.4" stroke-linecap="round"/></svg></div><div><b>SPEEDTV BOX</b><span>DIAGNÓSTICO · OTIMIZAÇÃO · CONTROLE</span></div></div><div class="hero-grid"><div><p class="eyebrow">RELATÓRIO TÉCNICO DA TV BOX</p><h1>Visão geral do equipamento</h1><p>__DEVICE__ · Gerado em __DATE__</p></div><div class="session">PASTA DA SESSÃO<br>__SESSION__</div></div></header>
+<section class="status __STATUS_CLASS__"><i class="dot"></i><div><b>__STATUS__</b><p>__STATUS_COPY__</p></div></section>
 <div class="grid">__CARDS__</div>
 <div class="columns">__RAM_CHART____PROCESS_CHART__</div>
-<section class="panel"><h2>Métricas por etapa</h2><table><thead><tr><th>Etapa</th><th>RAM disponível</th><th>Processos</th><th>Desativados</th><th>Armazenamento livre</th></tr></thead><tbody>__ROWS__</tbody></table></section>
-<section class="panel"><h2>Pacotes desativados nesta sessão</h2><ul>__PACKAGES__</ul></section>
-<section class="panel"><h2>Diagnósticos operacionais</h2>__DIAGNOSTICS__</section>
-<section class="panel"><h2>Como interpretar</h2><p>MemAvailable (ou livre + cache nos kernels antigos) é a referência de RAM disponível; MemFree isolado não representa a memória utilizável. Variações dependem do tempo desde o boot, cache e aplicativos abertos.</p><p>A contagem de processos é aproximada e não mede desempenho por si só.</p><p>Esta auditoria procura indicadores conhecidos e não certifica que o firmware está livre de malware.</p><p>Widevine informado pelo sistema não comprova certificação de streaming; só a reprodução protegida confirma o comportamento real.</p></section>
-<footer>SpeedTV Box · relatório local, sem bibliotecas ou serviços externos.</footer></main></html>"""
+<div class="columns">__STORAGE_CHART____DISABLED_CHART__</div>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">01 · IDENTIFICAÇÃO</p><h2>Ficha técnica do equipamento</h2><p class="muted">Informações coletadas diretamente do Android e do kernel.</p></div><span class="section-index">HARDWARE / SISTEMA</span></div><div class="kvgrid">__DEVICE_ROWS__</div></section>
+<div class="columns"><section class="panel"><div class="section-head"><div><p class="eyebrow">02 · PROCESSAMENTO</p><h2>CPU, GPU e temperatura</h2></div></div><div class="kvgrid">__CPU_ROWS__</div></section>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">03 · PROTEÇÃO</p><h2>Segurança do sistema</h2></div><span class="pill __ROOT_CLASS__">ROOT: __ROOT__</span></div><div class="kvgrid">__SECURITY_ROWS__</div></section></div>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">04 · RESULTADO</p><h2>O que a auditoria encontrou</h2><p class="muted">Indicadores são evidências para revisão, não conclusões automáticas de infecção.</p></div></div><ul class="list alert-list">__ALERTS__</ul></section>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">05 · PRÓXIMOS PASSOS</p><h2>Recomendações</h2></div></div><ul class="list recommend-list">__RECOMMENDATIONS__</ul></section>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">06 · AÇÕES</p><h2>Aplicativos e alterações</h2><p class="muted">Desativado não significa APK apagado. O estado original pode ser restaurado pelo agente quando registrado.</p></div></div><div class="columns"><div><h3>Desativados nesta sessão</h3><ul class="list">__PACKAGES__</ul></div><div><h3>Aplicativos de fábrica identificados</h3><ul class="list">__FACTORY__</ul></div></div></section>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">07 · DIAGNÓSTICOS</p><h2>Testes complementares realizados</h2></div></div>__DIAGNOSTICS__</section>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">08 · HISTÓRICO</p><h2>Métricas por etapa</h2><p class="muted">A comparação depende das amostras realmente coletadas nesta sessão.</p></div></div><div class="table-wrap"><table><thead><tr><th>Etapa</th><th>RAM disponível</th><th>Processos</th><th>Desativados</th><th>Armazenamento livre</th></tr></thead><tbody>__ROWS__</tbody></table></div></section>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">09 · DETALHES</p><h2>Dados técnicos adicionais</h2></div></div><details><summary>Fingerprint, serviços, portas e pacotes sinalizados</summary><pre>__ADVANCED__</pre></details><details><summary>Como interpretar este relatório</summary><p class="muted">MemAvailable (ou livre + cache em kernels antigos) é mais útil que MemFree isolado. A contagem de processos é aproximada. O nível Widevine exposto pelo sistema não garante certificação de um serviço de streaming. A ausência de indicadores conhecidos não comprova que a firmware esteja livre de malware. A leitura de frequência e temperatura depende do que o fabricante expõe ao Android.</p></details></section>
+<footer class="footer"><div><b>SPEEDTV BOX</b><br>Relatório local · não envia os dados para servidores externos</div><div>Arquivo gerado automaticamente<br>__DATE__</div></footer>
+</main></body></html>"""
+
+    ram_chart = grafico("RAM disponível por etapa", "mem_available_kb", " kB", "Memória utilizável, não apenas RAM livre.")
+    process_chart = grafico("Processos em execução", "processos", "", "Contagem aproximada de processos visíveis ao Android.")
+    storage_chart = grafico("Armazenamento livre", "data_livre_kb", " kB", "Espaço livre na partição de dados.")
+    disabled_chart = grafico("Pacotes desativados", "desativados", "", "Contagem acumulada em cada medição.")
     html_doc = (html_doc
-        .replace("__DATE__", esc(agora_iso()))
         .replace("__DEVICE__", esc(dispositivo))
+        .replace("__DATE__", esc(agora_iso()))
+        .replace("__SESSION__", esc(sessao_nome))
+        .replace("__STATUS_CLASS__", status_class)
+        .replace("__STATUS__", esc(status))
+        .replace("__STATUS_COPY__", esc(status_copy))
         .replace("__CARDS__", (
-            card("RAM física estimada", (str(antes.get("ram_real_mb")) + " MB") if antes.get("ram_real_mb") else "Não medida", antes.get("ram_fonte"))
-            + card("Pacotes instalados", antes.get("pacotes"), "antes")
-            + card("Pacotes instalados", (depois or {}).get("pacotes"), "depois" if depois else "sem leitura final")
-            + card("Desativados nesta sessão", len(desligados or []), "ações registradas")
-            + card("RAM disponível", ram_antes, "antes")
-            + card("RAM disponível", ram_depois, "depois")
-            + card("Acesso root", "Confirmado" if antes.get("root") else "Não disponível", "verificado no início da auditoria")
+            card("RAM física estimada", ("%s MB" % antes.get("ram_real_mb")) if antes.get("ram_real_mb") else "Não medida", antes.get("ram_fonte"), "▦")
+            + card("RAM disponível · antes", fmt_kb(ram_antes_kb), "Memória utilizável", "◫")
+            + card("RAM disponível · depois", fmt_kb(ram_depois_kb), "Variação: " + ram_delta_txt, "↗")
+            + card("Aplicativos instalados", antes.get("pacotes"), "Depois: %s" % pacote_delta, "▣")
+            + card("Armazenamento livre", fmt_kb(arm.get("livre_kb")), "Uso: %s" % (arm.get("uso") or "não informado"), "▤")
+            + card("Acesso root", root_txt, "Verificado durante a auditoria", "⌁")
+            + card("Android", "%s · SDK %s" % (antes.get("release") or "?", antes.get("sdk") or "?"), "Patch: %s" % (antes.get("patch") or "não informado"), "◉")
+            + card("Pacotes desativados", len(desligados or []), "Ações nesta sessão", "✓")
         ))
-        .replace("__RAM_CHART__", grafico("RAM disponível ao longo das ondas", "mem_available_kb", " kB"))
-        .replace("__PROCESS_CHART__", grafico("Processos por etapa", "processos"))
-        .replace("__ROWS__", "".join(linhas))
-        .replace("__PACKAGES__", pacotes)
-        .replace("__DIAGNOSTICS__", "".join("<article class='card'><strong>%s</strong><span>%s</span><small>%s</small></article>" % (esc(d.get("tipo")), esc(d.get("resumo")), esc(d.get("quando"))) for d in dados.get("diagnosticos_operacionais", [])) or "<p>Nenhum diagnóstico adicional registrado nesta sessão.</p>")
+        .replace("__RAM_CHART__", ram_chart)
+        .replace("__PROCESS_CHART__", process_chart)
+        .replace("__STORAGE_CHART__", storage_chart)
+        .replace("__DISABLED_CHART__", disabled_chart)
+        .replace("__DEVICE_ROWS__", "".join(device_rows))
+        .replace("__CPU_ROWS__", "".join(cpu_rows))
+        .replace("__SECURITY_ROWS__", "".join(security_rows))
+        .replace("__ROOT__", esc(root_txt))
+        .replace("__ROOT_CLASS__", "good" if antes.get("root") else "warn")
+        .replace("__ALERTS__", summary_alerts)
+        .replace("__RECOMMENDATIONS__", recommendations_html)
+        .replace("__PACKAGES__", disabled_items)
+        .replace("__FACTORY__", factory_items)
+        .replace("__DIAGNOSTICS__", diagnostics_html)
+        .replace("__ROWS__", "".join(data_rows))
+        .replace("__ADVANCED__", esc(json.dumps({
+            "fingerprint": antes.get("fingerprint"),
+            "display": antes.get("display"),
+            "servicos_rodando": antes.get("servicos_rodando"),
+            "init_contagem": antes.get("init_contagem"),
+            "init_suspeito": antes.get("init_suspeito"),
+            "ruins": antes.get("ruins"),
+            "permissoes": antes.get("permissoes"),
+            "portas_estranhas": antes.get("portas_estranhas"),
+            "zram": zram,
+            "widevine_bruto": antes.get("widevine_bruto"),
+        }, indent=2, ensure_ascii=False)))
     )
     html_path = pasta / "06 - Relatorio geral.html"
     html_path.write_text(html_doc, encoding="utf-8")
@@ -3440,7 +3609,6 @@ main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid 
         "html": publicar_relatorio(html_path) or html_path,
         "json": publicar_relatorio(json_path) or json_path,
     }
-
 
 def montar_relatorio_final(antes, depois, desligados, lixo, removidos_usuario=None):
     fim = depois or antes
