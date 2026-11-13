@@ -3628,7 +3628,32 @@ def montar_relatorio_final(antes, depois, desligados, lixo, removidos_usuario=No
     ]
     if depois:
         linhas.append("  Depois: " + linha_android(depois))
-    linhas += ["", "MEMÓRIA", "  Antes: " + linha_ram(antes)]
+    cpu_freq = antes.get("cpu_freq") or {}
+    sec = antes.get("seguranca_sistema") or {}
+    gpu = antes.get("gpu") or {}
+    temperaturas = antes.get("temperaturas") or []
+    linhas += [
+        "",
+        "EQUIPAMENTO",
+        "  CPU: %s" % (antes.get("cpu") or "não identificada"),
+        "  Núcleos: %s | ABI: %s" % (antes.get("nucleos") or "?", antes.get("abi") or "?"),
+        "  Frequência atual/máxima: %s / %s MHz" % (
+            round(cpu_freq["atual_khz"] / 1000) if cpu_freq.get("atual_khz") else "não exposta",
+            round(cpu_freq["max_khz"] / 1000) if cpu_freq.get("max_khz") else "não exposta",
+        ),
+        "  GPU/OpenGL: %s" % (gpu.get("gles") or gpu.get("egl") or "não informado"),
+        "  Tela: %s | densidade: %s" % (antes.get("display_size") or "não informada", antes.get("display_density") or "não informada"),
+        "  Temperaturas: %s" % (", ".join("%s: %s °C" % (t.get("zona"), t.get("celsius")) for t in temperaturas) if temperaturas else "não expostas"),
+        "",
+        "SEGURANÇA DO ANDROID",
+        "  SELinux: %s | Verified Boot: %s" % (sec.get("selinux") or "não informado", sec.get("verified_boot") or "não informado"),
+        "  Bootloader bloqueado: %s | vbmeta: %s" % (sec.get("bootloader_locked") or "não informado", sec.get("vbmeta_state") or "não informado"),
+        "  Criptografia: %s | build: %s | debug: %s" % (sec.get("crypto_state") or "não informado", sec.get("build_type") or "não informado", sec.get("debuggable") or "não informado"),
+        "  Depuração ADB: %s" % (sec.get("adb_enabled") or "não informado"),
+        "",
+        "MEMÓRIA",
+        "  Antes: " + linha_ram(antes),
+    ]
     if depois:
         linhas.append("  Depois: " + linha_ram(depois))
     linhas += [
