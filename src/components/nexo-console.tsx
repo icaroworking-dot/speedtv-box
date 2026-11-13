@@ -310,21 +310,18 @@ export function Console() {
     };
   }, []);
 
-  async function comPersonalizado(fn: (texto: string) => void | Promise<void>) {
+  function comPersonalizado(fn: (texto: string) => void) {
     try {
-      const bruto = codigo || (await lerAgente());
-      if (!codigo) setCodigo(bruto);
-      const pronto = personalizar(bruto, ip, api);
+      if (!codigo) throw new Error("O agente ainda está carregando. Aguarde alguns segundos e tente novamente.");
+      const pronto = personalizar(codigo, ip, api);
       try {
-        localStorage.setItem("speedtv-ip", ip.trim());
-        if (lembrarChave) {
-          localStorage.setItem("speedtv-api", api.trim());
-        } else {
+        if (lembrarChave) localStorage.setItem("speedtv-api", api.trim());
+        else {
           localStorage.removeItem("speedtv-api");
           localStorage.removeItem("nexo-api");
         }
       } catch {
-        // Preferências são opcionais; falha de storage nunca bloqueia a geração.
+        // Salvar preferências é opcional.
       }
       fn(pronto);
     } catch (erro) {
