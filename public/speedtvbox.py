@@ -285,10 +285,6 @@ WAVE3 = [
     "com.google.android.apps.nbu.files",
     "com.android.deskclock",
     "com.google.android.deskclock",
-    "com.softwinner.update",
-    "com.allwinnertech.superupgrade",
-    "android.rockchip.update.service",
-    "com.droidlogic.otaupgrade",
     "com.ionitech.airscreen",
     "com.google.android.marvin.talkback",
 ]
@@ -1101,7 +1097,15 @@ def home_package(adb):
 
 
 def coletar_metricas(adb, etiqueta):
-    mem = parse_meminfo(adb.shell("cat /proc/meminfo", 15))
+    # Três leituras curtas reduzem o ruído de uma única amostra de RAM.
+    amostras = []
+    for indice in range(3):
+        amostras.append(parse_meminfo(adb.shell("cat /proc/meminfo", 15)))
+        if indice < 2:
+            time.sleep(0.8)
+    mem = amostras[-1]
+    valores = sorted(v for v in (ram_usavel_kb(m) for m in amostras) if v is not None)
+    ram_mediana = valores[len(valores) // 2] if valores else None
     df = parse_df_data(adb.shell("df /data", 15))
     des = adb.disabled_names()
     ps = adb.shell("ps -A", 20)
@@ -1111,7 +1115,8 @@ def coletar_metricas(adb, etiqueta):
         "quando": agora_iso(),
         "etiqueta": etiqueta,
         "mem_total_kb": mem.get("MemTotal"),
-        "mem_available_kb": ram_usavel_kb(mem),
+        "mem_available_kb": ram_mediana,
+        "mem_samples": len(valores),
         "mem_free_kb": mem.get("MemFree"),
         "mem_cache_kb": (mem.get("Cached") or 0) + (mem.get("Buffers") or 0),
         "swap_total_kb": mem.get("SwapTotal"),
@@ -1900,7 +1905,7 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
     say("")
     say("Onda 1, %d aplicativos (telefone, impressão, telemetria)." % len(o1))
     say("Onda 2, %d aplicativos (anúncio, recomendação, app de telefone e o que está gastando RAM à toa)." % len(o2))
-    say("Onda 3, %d pacotes (Chrome, arquivos, relógio, OTA da placa) — pesa mais." % len(o3))
+    say("Onda 3, %d pacotes (navegador, arquivos e utilitários opcionais)." % len(o3))
     say("Onda 4, ajustes reversíveis: animação, recomendações, cache e modo ligado na tomada. DNS e resolução ficam intactos.")
     if not perguntar("Executar as ondas 1, 2 e 4?", default_sim=True, forcar=True if sim else None):
         say("Cancelado. Nada foi desativado.")
@@ -3328,8 +3333,10 @@ main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid 
     }
 
 
-def montar_relatorio_final(antes, depois, desligados, lixo):
+def montar_relatorio_final(antes, depois, desligados, lixo, removidos_usuario=None):
     fim = depois or antes
+    removidos_usuario = set(removidos_usuario or [])
+    somente_desativados = [p for p in (desligados or []) if p not in removidos_usuario]
     linhas = [
         "SPEEDTV BOX — RELATÓRIO",
         "TV Box: %s %s" % (antes.get("marca") or "?", antes.get("modelo") or "?"),
@@ -3361,10 +3368,15 @@ def montar_relatorio_final(antes, depois, desligados, lixo):
             % (depois.get("pacotes"), len(depois.get("desativados") or []))
         )
     if desligados:
-        linhas.append("  O SpeedTV Box desativou %d nesta sessão:" % len(desligados))
-        linhas.extend("    " + pkg for pkg in desligados)
+        linhas.append("  Ações nesta sessão: %d pacotes." % len(desligados))
+        if somente_desativados:
+            linhas.append("  Desativados (APK continua no sistema):")
+            linhas.extend("    " + pkg for pkg in somente_desativados)
+        if removidos_usuario:
+            linhas.append("  Desinstalados apenas para o usuário atual (APK de sistema preservado):")
+            linhas.extend("    " + pkg for pkg in sorted(removidos_usuario))
     else:
-        linhas.append("  Nenhum pacote foi desativado nesta sessão.")
+        linhas.append("  Nenhum pacote foi alterado nesta sessão.")
     if lixo:
         linhas.append("  Lixo de fábrica visto na leitura:")
         linhas.extend("    %s — %s" % (rot, pkg) for pkg, rot in lixo)
@@ -3461,7 +3473,8 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
         for onda in ondas_novas
         for pkg in (onda.get("desativados") or [])
     ))
-    texto = montar_relatorio_final(antes, depois, desligados, lixo)
+    removidos_sessao = set(journal.get("removidos") or []) & set(desligados)
+    texto = montar_relatorio_final(antes, depois, desligados, lixo, removidos_sessao)
     log = anexar_log("relatorio", texto, texto)
     visual = gerar_relatorio_visual(antes, depois, desligados, lixo)
     titulo("Relatório")
@@ -3895,6 +3908,42 @@ def gerenciar_google(adb):
     say("Não foi usado uninstall. Reverter também restaura estes estados.")
 
 
+def gerenciar_ota(adb):
+    titulo("Atualizador OTA do fabricante")
+    conectar_ou_explicar(adb)
+    candidatos = [
+        ("com.softwinner.update", "Softwinner"),
+        ("com.allwinnertech.superupgrade", "Allwinner"),
+        ("android.rockchip.update.service", "Rockchip"),
+        ("com.droidlogic.otaupgrade", "Droidlogic"),
+        ("com.android.amediatech.fota", "Amediatech"),
+        ("com.abupdate.fota_demo_iot", "Adups demo FOTA"),
+    ]
+    presentes = [(p,n) for p,n in candidatos if adb.existe(p)]
+    if not presentes:
+        say("Nenhum dos atualizadores conhecidos desta lista está instalado.")
+        return
+    for pkg,nome in presentes:
+        code=adb.enabled_code(pkg)
+        say("%s (%s) — %s"%(pkg,nome,"ligado" if code in (0,1,None) else "desativado"))
+    say("Atualizações do fabricante podem corrigir bugs; manter o serviço é o padrão recomendado.")
+    if not perguntar("Desativar somente os atualizadores listados? Só faça isso se não quiser receber OTA.",False):
+        return
+    journal=carregar_journal()
+    for pkg,_ in presentes:
+        code=adb.enabled_code(pkg)
+        if code not in (0,1,None): continue
+        journal.setdefault("package_states",{}).setdefault(pkg,{"enabled":code,"removido_para_usuario":False,"quando":agora_iso()})
+        out=adb.shell("pm disable-user --user %s %s"%(adb.user,pkg),20)
+        if "new state: disabled" in out.lower():
+            if pkg not in journal.setdefault("disabled",[]): journal["disabled"].append(pkg)
+            say("Desativado: "+pkg)
+        else: say("Não confirmado: %s — %s"%(pkg,out[:140]))
+    salvar_journal(journal)
+    escrever_rollback(adb.serial,adb.binary,journal.get("disabled",[]),journal.get("package_states"))
+    say("A reversão restaura os estados anteriores.")
+
+
 def auditar_rede(adb):
     titulo("Rede — diagnóstico para IPTV")
     conectar_ou_explicar(adb)
@@ -3966,6 +4015,7 @@ def menu(adb, sim=False, sem_onda3=False):
         say("  10 Diagnóstico de rede para IPTV")
         say("  11 Codecs e reprodução de áudio/vídeo")
         say("  12 Investigar barra lateral/navegação")
+        say("  13 Serviços de atualização OTA do fabricante")
         say("  0  Sair")
         try:
             escolha = input("\nDigite o número da tarefa: ").strip()
@@ -4008,6 +4058,8 @@ def menu(adb, sim=False, sem_onda3=False):
                 auditar_video(adb)
             elif escolha == "12":
                 diagnosticar_barra(adb)
+            elif escolha == "13":
+                gerenciar_ota(adb)
             elif escolha == "0":
                 return
             else:
