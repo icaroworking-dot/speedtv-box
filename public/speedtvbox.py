@@ -3468,6 +3468,7 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
         kv("Patch de segurança", antes.get("patch")),
         kv("Kernel", antes.get("kernel")),
         kv("Arquitetura", antes.get("abi")),
+        kv("Pacotes (sistema / terceiros)", "%s / %s" % (antes.get("sistema") or 0, antes.get("terceiros") or 0)),
         kv("Resolução reportada", display),
         kv("Densidade", density),
         kv("Widevine", antes.get("widevine")),
@@ -3575,7 +3576,7 @@ details{border-top:1px solid #ffffff12;padding:13px 0}details summary{cursor:poi
             + card("RAM disponível · antes", fmt_kb(ram_antes_kb), "Memória utilizável", "◫")
             + card("RAM disponível · depois", fmt_kb(ram_depois_kb), "Variação: " + ram_delta_txt, "↗")
             + card("Aplicativos instalados", antes.get("pacotes"), "Depois: %s" % pacote_delta, "▣")
-            + card("Armazenamento livre", fmt_kb(arm.get("livre_kb")), "Uso: %s" % (arm.get("uso") or "não informado"), "▤")
+            + card("Armazenamento livre", fmt_kb(arm.get("livre_kb")), "Depois: %s · uso inicial: %s" % (fmt_kb(((depois or {}).get("armazenamento") or {}).get("livre_kb")), arm.get("uso") or "não informado"), "▤")
             + card("Acesso root", root_txt, "Verificado durante a auditoria", "⌁")
             + card("Android", "%s · SDK %s" % (antes.get("release") or "?", antes.get("sdk") or "?"), "Patch: %s" % (antes.get("patch") or "não informado"), "◉")
             + card("Pacotes desativados", len(desligados or []), "Ações nesta sessão", "✓")
@@ -3599,6 +3600,9 @@ details{border-top:1px solid #ffffff12;padding:13px 0}details summary{cursor:poi
         .replace("__THIRD_PARTY__", third_party_html)
         .replace("__ADVANCED__", esc(json.dumps({
             "fingerprint": antes.get("fingerprint"),
+            "pacotes_sistema": antes.get("pacotes_sistema"),
+            "pacotes_terceiros": antes.get("pacotes_terceiros"),
+            "pacotes_desativados_antes": antes.get("desativados"),
             "display": antes.get("display"),
             "servicos_rodando": antes.get("servicos_rodando"),
             "init_contagem": antes.get("init_contagem"),
