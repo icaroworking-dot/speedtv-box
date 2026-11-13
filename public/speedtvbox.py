@@ -1965,7 +1965,7 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
 def reverter(adb, sim=False):
     titulo("Reverter")
     journal = carregar_journal()
-    pkgs = list(journal.get("disabled") or [])
+    pkgs = list(dict.fromkeys((journal.get("disabled") or []) + list((journal.get("package_states") or {}).keys())))
     tem_oem = bool(journal.get("oemcrypto"))
     scripts = list(journal.get("scripts") or [])
     if not pkgs and not journal.get("settings") and not journal.get("wm") and not tem_oem and not scripts:
