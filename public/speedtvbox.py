@@ -3562,6 +3562,18 @@ def _definir_launcher(adb, pacote):
             pass
         if home_package(adb) == pacote:
             return True, componente
+    say("O Android não aceitou a troca silenciosa. Vou abrir a escolha de tela inicial.")
+    try:
+        adb.shell(
+            "am start -a android.intent.action.MAIN -c android.intent.category.HOME", 20
+        )
+    except Exception:
+        pass
+    say("Na TV, selecione o launcher recém-instalado e marque 'Sempre', se aparecer.")
+    try:
+        input("Depois de escolher a nova tela inicial na TV, pressione Enter aqui…")
+    except EOFError:
+        pass
     return home_package(adb) == pacote, componente
 
 
