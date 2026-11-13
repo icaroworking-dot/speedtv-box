@@ -3056,7 +3056,7 @@ def seguranca(adb,sim=False):
     if bad: say("Pacotes: "+", ".join(bad[:6]))
     if perms: say("Apps para revisar: "+", ".join(x.get("pacote","?") for x in perms[:5]))
     if not bad and not perms and not suspicious: say("Nenhum indicador conhecido encontrado; isso não é garantia de ausência de malware.")
-    options=[]
+    options=[]; actions_done=[]
     if bad: options.append("1 Desativar pacotes sinalizados (reversível)")
     if suspicious and root: options.append("2 Quarentenar scripts de boot suspeitos (root, com backup)")
     if verifier!="1": options.append("3 Ativar verificação de apps")
@@ -3065,12 +3065,17 @@ def seguranca(adb,sim=False):
         try: choice=input("Escolha: ").strip()
         except EOFError: choice="0"
         allsafe=choice=="4"; j=carregar_journal()
-        if bad and (choice=="1" or allsafe): desativar(adb,Gate(coletar_dinamicos(adb)),j,bad,"virus")
-        if suspicious and root and (choice=="2" or allsafe): afastar_scripts(adb,j,suspicious)
+        if bad and (choice=="1" or allsafe):
+            desativar(adb,Gate(coletar_dinamicos(adb)),j,bad,"virus")
+            actions_done.append("desativação solicitada para pacotes sinalizados")
+        if suspicious and root and (choice=="2" or allsafe):
+            actions_done.extend(["quarentena: "+x for x in afastar_scripts(adb,j,suspicious)])
         if verifier!="1" and (choice=="3" or allsafe):
-            ok,msg=setting_put(adb,j,"global","package_verifier_enable","1"); say(msg if ok else "Não aplicado: "+msg)
+            ok,msg=setting_put(adb,j,"global","package_verifier_enable","1")
+            say(msg if ok else "Não aplicado: "+msg)
+            actions_done.append("verificador: "+msg if ok else "verificador não aplicado: "+msg)
     else: say("Nenhuma ação corretiva indicada.")
-    data={"root":root,"pacotes_sinalizados":bad,"permissoes_sensiveis":perms,"scripts_boot":scripts,"verificador_apps":verifier,"limite":"Indicadores conhecidos; não é antivírus completo."}
+    data={"root":root,"pacotes_sinalizados":bad,"permissoes_sensiveis":perms,"scripts_boot":scripts,"verificador_apps":verifier,"opcoes_disponiveis":options,"escolha":choice if "choice" in locals() else "nenhuma","acoes_realizadas":actions_done,"limite":"Indicadores conhecidos; não é antivírus completo."}
     registrar_relatorio_operacional("Segurança","Nenhum indicador conhecido." if not bad and not perms and not suspicious else "Itens encontrados para revisão.",data)
 
 
@@ -3237,6 +3242,7 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
             {"pacote": pkg, "nome": nome} for pkg, nome in (lixo or [])
         ],
         "metricas_por_etapa": metricas,
+        "diagnosticos_operacionais": [json.loads(x) for x in (pasta / "diagnosticos.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()] if (pasta / "diagnosticos.jsonl").is_file() else [],
     }
     json_path = pasta / "relatorio.json"
     json_path.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -3306,6 +3312,7 @@ main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid 
 <div class="columns">__RAM_CHART____PROCESS_CHART__</div>
 <section class="panel"><h2>Métricas por etapa</h2><table><thead><tr><th>Etapa</th><th>RAM disponível</th><th>Processos</th><th>Desativados</th><th>Armazenamento livre</th></tr></thead><tbody>__ROWS__</tbody></table></section>
 <section class="panel"><h2>Pacotes desativados nesta sessão</h2><ul>__PACKAGES__</ul></section>
+<section class="panel"><h2>Diagnósticos operacionais</h2>__DIAGNOSTICS__</section>
 <section class="panel"><h2>Como interpretar</h2><p>MemAvailable (ou livre + cache nos kernels antigos) é a referência de RAM disponível; MemFree isolado não representa a memória utilizável. Variações dependem do tempo desde o boot, cache e aplicativos abertos.</p><p>A contagem de processos é aproximada e não mede desempenho por si só.</p><p>Esta auditoria procura indicadores conhecidos e não certifica que o firmware está livre de malware.</p><p>Widevine informado pelo sistema não comprova certificação de streaming; só a reprodução protegida confirma o comportamento real.</p></section>
 <footer>SpeedTV Box · relatório local, sem bibliotecas ou serviços externos.</footer></main></html>"""
     html_doc = (html_doc
@@ -3323,6 +3330,7 @@ main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid 
         .replace("__PROCESS_CHART__", grafico("Processos por etapa", "processos"))
         .replace("__ROWS__", "".join(linhas))
         .replace("__PACKAGES__", pacotes)
+        .replace("__DIAGNOSTICS__", "".join("<article class='card'><strong>%s</strong><span>%s</span><small>%s</small></article>" % (esc(d.get("tipo")), esc(d.get("resumo")), esc(d.get("quando"))) for d in dados.get("diagnosticos_operacionais", [])) or "<p>Nenhum diagnóstico adicional registrado nesta sessão.</p>")
     )
     html_path = pasta / "relatorio.html"
     html_path.write_text(html_doc, encoding="utf-8")
