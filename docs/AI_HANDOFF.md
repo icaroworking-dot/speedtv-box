@@ -2,7 +2,7 @@
 
 Última revisão: 2026-11-13  
 Branch de trabalho: `codex/speedtvbox-overhaul`  
-Versão do agente nesta branch: 8
+Versão do agente nesta branch: 9
 
 ## Objetivo
 
@@ -20,7 +20,12 @@ Manter uma página React que gera um agente Python/ADB personalizado para TV Box
 
 ### Agente Python
 
-- Atualizada versão para 8.
+- Atualizada versão para 9.
+- Menu principal substituído por assistente guiado organizado por finalidade: otimização completa, diagnóstico somente leitura, RAM/armazenamento, instaladores, Play Store, segurança, recuperação e ferramentas.
+- Adicionados instaladores oficiais para Glass Launcher (`com.fares.glass`, repositório `tlfares/GlassLauncher`) e Projectivy (`com.spocky.projengmenu`, repositório `spocky/miproja1`). Os APKs são obtidos por APIs de releases e hosts HTTPS explicitamente permitidos; tamanho máximo 60 MB e assinatura/compatibilidade são validadas pelo instalador Android. Downloader (`com.esaba.downloader`) abre a listagem oficial do Google Play para instalação confirmada pelo usuário.
+- A troca de launcher só desativa o anterior após o usuário testar HOME e confirmar; o pacote anterior fica desativado para o usuário, não apagado de `/system`, e é registrado no journal/rollback.
+- Incluídos limpeza de cache via `pm trim-caches` com medição de espaço antes/depois e fechamento opcional de apps de usuário pesados, sem forçar parada de serviços de sistema.
+- Ampliada a lista exata de utilitários de fábrica conhecidos, incluindo pacotes observados no Aquário STV 3000 Plus e apps opcionais Pluto TV/VLC. Mantida a proteção contra correspondência genérica por substring.
 - Incluídos indicadores XCPE conhecidos no inventário: `com.abc.nexus`, `com.android.system.ntp`, `com.android.sso.auth.handler` e `com.ota.service`, além de `x.cpe` e `com.oemservice`.
 - A seleção automática por substrings genéricas como `ota` e `recommend` foi removida da onda 2. Agora só entram nomes explicitamente conhecidos.
 - A limpeza profunda não oferece mais remoção em massa de pacotes de sistema desconhecidos. Hardware de TV Box usa serviços proprietários que não podem ser classificados só pelo nome.
@@ -78,4 +83,5 @@ Manter uma página React que gera um agente Python/ADB personalizado para TV Box
 
 ## Histórico da branch
 
-- 2026-11-13: branch criada para o overhaul; agente v8, rollback, seleção de pacotes, ajustes conservadores, relatório HTML/JSON, validação da página e documentação atualizados.
+- 2026-11-13: agente v8, rollback, relatório HTML/JSON e CI aprovados em `main`.
+- 2026-11-13: branch `codex/speedtvbox-guided-experience` com agente v9, menu guiado, instaladores oficiais, gerenciamento de launcher com confirmação e rollback, RAM/armazenamento e tutoriais atualizados; aguardando CI e teste em hardware.
