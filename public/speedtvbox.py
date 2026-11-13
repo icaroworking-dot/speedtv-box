@@ -38,7 +38,7 @@ DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "10"
+VERSAO = "11"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -1329,7 +1329,7 @@ def auditar(adb, falar=True):
     if falar:
         titulo("Auditoria forense — só leitura")
         say("Nada é desativado nesta etapa.")
-    props = adb.getprop_all()
+    root_ok = bool(tem_root(adb))\n    props = adb.getprop_all()
     mem_txt = adb.shell("cat /proc/meminfo", 15)
     mem = parse_meminfo(mem_txt)
     iomem = adb.shell("cat /proc/iomem 2>/dev/null | grep -i 'System RAM'", 15)
@@ -1585,7 +1585,7 @@ def imprimir_auditoria(r):
     if r.get("dmesg_memory"):
         say("  dmesg             : %s" % r["dmesg_memory"].splitlines()[0][:180])
     say("")
-    say("Widevine            : %s" % r.get("widevine"))
+    say("Acesso root         : %s" % ("confirmado" if r.get("root") else "não disponível"))\n    say("Widevine            : %s" % r.get("widevine"))
     arm = r.get("armazenamento") or {}
     say("Armazenamento /data : %s livres (%s)" % (kb_mb(arm.get("livre_kb")), arm.get("uso") or "sem %"))
     z = r.get("zram") or {}
@@ -3037,40 +3037,32 @@ def nomes_de_risco(rel):
     return [r for r in (rel.get("ruins") or []) if "removido" not in r and validar_pacote(r)]
 
 
-def seguranca(adb, sim=False):
-    titulo("Segurança")
-    say("Em novembro de 2026 o Google descreveu o backdoor XCPE em mais de")
-    say("um milhão de TV boxes. O pacote é com.oemservice (às vezes x.cpe).")
-    say("Ele volta da partição /oem se for apagado. disable-user impede o")
-    say("boot de subir o serviço. Isto não é antivírus e não limpa a firmware.")
-    say("Se o pacote estiver ativo, tire a TV Box da internet até desativar.")
-    conectar_ou_explicar(adb)
-    rel = auditar(adb, falar=False)
-    ruins = nomes_de_risco(rel)
-    if not ruins:
-        say("Nenhum nome da lista (Adups, XCPE, OTA silenciosa da placa, miner).")
-    else:
-        say("Encontrados:")
-        for nome in ruins:
-            extra = ""
-            if nome in ("com.oemservice", "x.cpe"):
-                extra = "  ← backdoor de firmware. Não confie no reset sozinho."
-            say("  %s%s" % (nome, extra))
-    verifier = setting_get(adb, "global", "package_verifier_enable")
-    say("Play Protect (package_verifier_enable): %s" % (verifier or "padrão"))
-    if not ruins and verifier == "1":
-        say("Nada para desativar. O verificador da loja já está ligado.")
-        return
-    if ruins and perguntar("Desativar estes nomes (reversível, não apaga o APK)?", False, False if sim else None):
-        gate = Gate(coletar_dinamicos(adb))
-        journal = carregar_journal()
-        desativar(adb, gate, journal, ruins, "virus")
-        say("Se com.oemservice estava na lista, reinicie e rode o diagnóstico de novo.")
-        say("Se ele voltar ligado sozinho, a firmware reinstala. Aí a TV Box não é confiável na sua rede.")
-    if verifier != "1" and perguntar("Ligar o verificador de apps da Play Store?", True, True if sim else None):
-        journal = carregar_journal()
-        ok, msg = setting_put(adb, journal, "global", "package_verifier_enable", "1")
-        say("verificador: %s" % (msg if ok else "não apliquei — " + msg))
+def seguranca(adb,sim=False):
+    titulo("Segurança — resumo e ações"); conectar_ou_explicar(adb)
+    rel=auditar(adb,falar=False); root=bool(tem_root(adb)); bad=nomes_de_risco(rel); perms=rel.get("permissoes") or []
+    scripts=rel.get("boot_scripts") or []; suspicious=[x for x in scripts if not x.get("protegido")]
+    verifier=setting_get(adb,"global","package_verifier_enable")
+    say("Pacotes sinalizados: %d | permissões sensíveis: %d | scripts suspeitos: %d"%(len(bad),len(perms),len(suspicious)))
+    say("Root: %s | verificação de apps: %s"%("confirmado" if root else "não disponível","ligada" if verifier=="1" else "desligada/padrão"))
+    if bad: say("Pacotes: "+", ".join(bad[:6]))
+    if perms: say("Apps para revisar: "+", ".join(x.get("pacote","?") for x in perms[:5]))
+    if not bad and not perms and not suspicious: say("Nenhum indicador conhecido encontrado; isso não é garantia de ausência de malware.")
+    options=[]
+    if bad: options.append("1 Desativar pacotes sinalizados (reversível)")
+    if suspicious and root: options.append("2 Quarentenar scripts de boot suspeitos (root, com backup)")
+    if verifier!="1": options.append("3 Ativar verificação de apps")
+    if options:
+        say("Ações disponíveis:"); [say("  "+x) for x in options]; say("  4 Aplicar todas as ações seguras | 0 Não alterar")
+        try: choice=input("Escolha: ").strip()
+        except EOFError: choice="0"
+        allsafe=choice=="4"; j=carregar_journal()
+        if bad and (choice=="1" or allsafe): desativar(adb,Gate(coletar_dinamicos(adb)),j,bad,"virus")
+        if suspicious and root and (choice=="2" or allsafe): afastar_scripts(adb,j,suspicious)
+        if verifier!="1" and (choice=="3" or allsafe):
+            ok,msg=setting_put(adb,j,"global","package_verifier_enable","1"); say(msg if ok else "Não aplicado: "+msg)
+    else: say("Nenhuma ação corretiva indicada.")
+    data={"root":root,"pacotes_sinalizados":bad,"permissoes_sensiveis":perms,"scripts_boot":scripts,"verificador_apps":verifier,"limite":"Indicadores conhecidos; não é antivírus completo."}
+    registrar_relatorio_operacional("Segurança","Nenhum indicador conhecido." if not bad and not perms and not suspicious else "Itens encontrados para revisão.",data)
 
 
 def diagnostico(adb):
@@ -3932,43 +3924,76 @@ def gerenciar_ota(adb):
     say("A reversão restaura os estados anteriores.")
 
 
+def registrar_relatorio_operacional(tipo,resumo,dados):
+    pasta=garantir_dados(); registro={"quando":agora_iso(),"tipo":tipo,"resumo":resumo,"dados":dados}
+    with (pasta/"diagnosticos.jsonl").open("a",encoding="utf-8") as fh: fh.write(json.dumps(registro,ensure_ascii=False)+"\\n")
+    base="%s_%s"%(datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),_nome_arquivo(tipo))
+    bruto=json.dumps(dados,indent=2,ensure_ascii=False)
+    txt=pasta/(base+".txt"); txt.write_text("SpeedTV Box — %s\\nQuando: %s\\n\\nRESUMO\\n%s\\n\\nDETALHES TÉCNICOS\\n%s\\n"%(tipo,registro["quando"],resumo,bruto),encoding="utf-8")
+    h=pasta/(base+".html"); h.write_text("<!doctype html><html lang='pt-BR'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>SpeedTV Box — %s</title><style>body{font:16px system-ui;background:#07101f;color:#eef5ff;max-width:900px;margin:32px auto;padding:0 18px}article{background:#101d31;border:1px solid #263852;border-radius:14px;padding:18px;margin:14px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#c5d4e8;font-size:13px}</style><h1>SpeedTV Box — %s</h1><article><h2>Resumo</h2><p>%s</p></article><article><h2>Registro técnico</h2><pre>%s</pre></article></html>"%tuple(html.escape(x) for x in (tipo,tipo,resumo,bruto)),encoding="utf-8")
+    say("Relatórios: %s | %s"%(publicar_relatorio(txt) or txt,publicar_relatorio(h) or h))
+    return registro
+
+
 def auditar_rede(adb):
-    titulo("Rede — diagnóstico para IPTV")
-    conectar_ou_explicar(adb)
-    props=adb.getprop_all()
-    iface=props.get("wifi.interface") or "wlan0"
-    say("Wi-Fi:")
-    say(adb.shell("dumpsys wifi 2>/dev/null | grep -i -E 'SSID|BSSID|RSSI|frequency|link speed|WifiInfo' | head -n 40",25) or "Sem dados Wi-Fi.")
-    say("Interfaces/rotas:")
-    say(adb.shell("ip -br addr 2>/dev/null; ip route 2>/dev/null",20) or "Sem saída.")
-    say("DNS: "+", ".join(x for x in (props.get("net.dns1"),props.get("net.dns2")) if x) or "não exposto")
-    say("Interface %s: estado=%s velocidade=%s"%(iface,
-        adb.shell("cat /sys/class/net/%s/operstate 2>/dev/null"%iface,10).strip() or "?",
-        adb.shell("cat /sys/class/net/%s/speed 2>/dev/null"%iface,10).strip() or "?"))
-    say("Ping IP (1.1.1.1):")
-    say(adb.shell("ping -c 4 -W 2 1.1.1.1 2>/dev/null",15) or "ping indisponível/bloqueado")
-    say("Ping com DNS (google.com):")
-    say(adb.shell("ping -c 2 -W 2 google.com 2>/dev/null",15) or "ping/DNS indisponível")
-    say("Para IPTV: Ethernet gigabit é preferível; Wi-Fi 5 GHz perto do roteador costuma superar 2,4 GHz congestionado.")
-    say("RSSI perto de -30 dBm é excelente; abaixo de -67 dBm pode ficar instável. Link speed não é throughput.")
-    say("Nenhum DNS, canal, MTU ou parâmetro de rádio foi alterado.")
+    titulo("Rede — diagnóstico inteligente para IPTV"); conectar_ou_explicar(adb)
+    props=adb.getprop_all(); iface=props.get("wifi.interface") or "wlan0"
+    w=adb.shell("dumpsys wifi 2>/dev/null | grep -i -E 'SSID|RSSI|frequency|link speed|WifiInfo' | head -n 30",20)
+    m=re.search(r"RSSI[:= ]+(-?\\d+)",w,re.I); rssi=int(m.group(1)) if m else None
+    m=re.search(r"(?:frequency|freq)[:= ]+(\\d+)",w,re.I); freq=int(m.group(1)) if m else None
+    m=re.search(r"link.?speed[:= ]+(\\d+)",w,re.I); speed=int(m.group(1)) if m else None
+    ping=adb.shell("ping -c 20 -W 2 1.1.1.1 2>/dev/null",55)
+    m=re.search(r"(\\d+(?:\\.\\d+)?)% packet loss",ping); loss=float(m.group(1)) if m else None
+    m=re.search(r"= [\\d.]+/[\\d.]+/([\\d.]+)/",ping); avg=float(m.group(1)) if m else None
+    dns=adb.shell("ping -c 2 -W 2 google.com 2>/dev/null",15)
+    dns_ok=bool(re.search(r"bytes from|\\d+ packets transmitted, [1-9]\\d* received",dns,re.I))
+    sleep=setting_get(adb,"global","wifi_sleep_policy"); root=bool(tem_root(adb))
+    band="5 GHz" if freq and freq>=5000 else "2,4 GHz" if freq and freq<3000 else "não identificada"
+    signal="bom" if rssi is not None and rssi>=-60 else "mediano" if rssi is not None and rssi>=-67 else "fraco" if rssi is not None else "não informado"
+    verdict=("Conexão com bons sinais para IPTV; teste curto não garante estabilidade por horas." if loss==0 and avg is not None and avg<50 and signal!="fraco" else "Há indícios de instabilidade; aproxime a TV Box do roteador ou teste Ethernet." if (loss is not None and loss>0) or signal=="fraco" else "Diagnóstico inconclusivo; repita o teste em outro horário.")
+    say(verdict); say("• Wi-Fi %s | sinal %s%s"%(band,signal,(" (%d dBm)"%rssi) if rssi is not None else ""))
+    say("• Perda %s | latência %s | DNS %s"%(("%s%%"%loss) if loss is not None else "não medida",("%.1f ms"%avg) if avg is not None else "não medida","respondeu" if dns_ok else "não confirmado"))
+    say("• Link reportado %s Mbps (não é velocidade real da internet)."%(speed if speed is not None else "—"))
+    can=sleep!="2"
+    if can: say("  1 Manter Wi-Fi acordado enquanto ligado à energia (reversível)\\n  2 Teste estendido\\n  3 Aplicar ajuste e testar")
+    else: say("Wi-Fi já fica acordado. 1 = teste estendido.")
+    try: choice=input("Escolha (0 para sair): ").strip()
+    except EOFError: choice="0"
+    actions=[]
+    if can and choice in ("1","3"):
+        j=carregar_journal(); ok,msg=setting_put(adb,j,"global","wifi_sleep_policy","2"); actions.append({"acao":"wifi_sleep_policy=2","resultado":msg if ok else msg}); say(msg if ok else "Não aplicado: "+msg)
+    if choice in (("2","3") if can else ("1",)):
+        ext=adb.shell("ping -c 30 -W 2 1.1.1.1 2>/dev/null",75)
+        m=re.search(r"(\\d+(?:\\.\\d+)?)% packet loss",ext); pl=float(m.group(1)) if m else None
+        m=re.search(r"= [\\d.]+/[\\d.]+/([\\d.]+)/",ext); av=float(m.group(1)) if m else None
+        actions.append({"acao":"ping_30_pacotes","perda_pct":pl,"latencia_media_ms":av,"saida":ext[-1500:]}); say("Teste estendido concluído.")
+    data={"veredito":verdict,"interface":iface,"banda":band,"rssi_dbm":rssi,"frequencia_mhz":freq,"link_speed_mbps":speed,"perda_pct":loss,"latencia_media_ms":avg,"dns_ok":dns_ok,"wifi_sleep_policy_antes":sleep,"root":root,"acoes":actions,"ping_bruto":ping[-2200:],"dns_bruto":dns[-700:]}
+    registrar_relatorio_operacional("Rede IPTV",verdict,data)
 
 
 def auditar_video(adb):
-    titulo("Codecs e reprodução — IPTV")
-    conectar_ou_explicar(adb)
-    props=adb.getprop_all()
-    for key in ("ro.product.board","ro.board.platform","ro.hardware","ro.product.cpu.abi","ro.opengles.version"):
-        if props.get(key): say("%s = %s"%(key,props[key]))
-    say("Saída/densidade:"); say(adb.shell("wm size; wm density",15))
-    codecs=adb.shell("dumpsys media.codec 2>/dev/null | head -n 240",35)
-    if len(codecs.strip())<20: codecs=adb.shell("cmd media.codec list 2>/dev/null | head -n 240",25)
-    say("Codecs registrados pelo Android:"); say(codecs or "O firmware não expôs a lista.")
-    say("Media player:"); say(adb.shell("dumpsys media.player 2>/dev/null | head -n 80",20) or "sem saída")
-    say("Media extractor:"); say(adb.shell("dumpsys media.extractor 2>/dev/null | head -n 80",20) or "sem saída")
-    say("A lista de codecs não prova decodificação 4K em hardware. É preciso conferir codec, perfil, bit depth, HDR, fps e hardware decoding no player.")
-    say("O agente não instala APK de codec nem troca OMX/C2: decoders de hardware vêm do firmware/vendor.")
-    say("Para engasgos, teste o mesmo stream em outro player, reduza bitrate/fps e compare com Ethernet antes de forçar 1080p.")
+    titulo("Codecs e reprodução — diagnóstico para IPTV"); conectar_ou_explicar(adb)
+    p=adb.getprop_all(); platform={k:p.get(k,"") for k in ("ro.product.board","ro.board.platform","ro.hardware","ro.product.cpu.abi") if p.get(k)}
+    raw=adb.shell("cmd media.codec list 2>/dev/null | head -n 220",30)
+    if len(raw.strip())<20: raw=adb.shell("dumpsys media.codec 2>/dev/null | head -n 160",25)
+    names=sorted(set(re.findall(r"(?:OMX|c2)\\.[A-Za-z0-9_.-]+",raw)))
+    hw=[n for n in names if not re.search(r"google|software|sw\\.",n,re.I)]; sw=[n for n in names if n not in hw]
+    wm=adb.shell("wm size",12); phys=re.search(r"Physical size:\\s*(\\d+)x(\\d+)",wm); over=re.search(r"Override size:\\s*(\\d+)x(\\d+)",wm)
+    mismatch=bool(phys and over and (phys.group(1),phys.group(2))!=(over.group(1),over.group(2)))
+    say("Plataforma: %s."%(platform.get("ro.board.platform") or platform.get("ro.hardware") or "não identificada"))
+    say("Codecs expostos: %d (%d nomes de fabricante; %d software)."%(len(names),len(hw),len(sw)) if names else "Firmware não expôs lista confiável de codecs.")
+    if mismatch:
+        say("Interface forçada em %sx%s; painel reporta %sx%s."%(over.group(1),over.group(2),phys.group(1),phys.group(2)))
+        say("1 Restaurar resolução física da interface (não altera decoder) | 2 Não alterar | 3 Aplicar")
+    else: say("Sem resolução forçada detectada. Não há APK genérico que instale decodificadores de hardware ausentes; dependem do firmware/chip.")
+    try: choice=input("Escolha (0 para sair): ").strip()
+    except EOFError: choice="0"
+    actions=[]
+    if mismatch and choice in ("1","3"):
+        j=carregar_journal(); j.setdefault("wm",{}); j["wm"]["size_antes"]=wm.strip(); j["wm"]["size_set"]="reset-to-physical"; salvar_journal(j)
+        out=adb.shell("wm size reset",15); actions.append({"acao":"wm size reset","resultado":out or "comando enviado","escopo":"resolução da interface, não codecs"}); say("Resolução restaurada. Use Desfazer para recuperar a anterior.")
+    data={"plataforma":platform,"codecs_nomes":names,"hardware_aparente":hw,"software_aparente":sw,"wm_size_antes":wm,"override_incompativel":mismatch,"acoes":actions,"codecs_brutos":raw[-5000:],"limite":"Lista de nomes não comprova perfil, bit depth, HDR, fps ou decodificação real."}
+    registrar_relatorio_operacional("Codecs e reprodução","Diagnóstico concluído; nenhum codec foi instalado ou substituído.",data)
 
 
 def diagnosticar_barra(adb):
@@ -4108,7 +4133,7 @@ def submenu(adb, sim=False):
             say("Não reconheci essa opção.")
 
 def selftest():
-    assert VERSAO == "10"
+    assert VERSAO == "11"
     assert SDK_ANDROID_VERSION[25] == "7.1"
     assert avaliar_android(25, "10.1", (3, 10))["mentira"] is True
     assert "Android 7.1" in linha_android({"release":"10.1","sdk":25,"kernel":"3.10","android":avaliar_android(25,"10.1",(3,10))})
