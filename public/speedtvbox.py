@@ -3258,24 +3258,28 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
 main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid var(--line)}h1{font-size:clamp(2rem,5vw,3.5rem);margin:5px 0}h2{font-size:1.15rem;margin:0 0 18px}p,small,span{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0}
 .card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}.card small,.card strong,.card span{display:block}.card strong{font-size:1.65rem;margin:8px 0;color:var(--text)}.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:14px 0}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:12px 0;font-size:.85rem}.track{height:10px;background:#24354d;border-radius:99px;overflow:hidden}.track i{display:block;height:100%;background:linear-gradient(90deg,#3d9edb,var(--accent));border-radius:99px}.barrow b{text-align:right}.panel{margin:14px 0;overflow:auto}table{width:100%;border-collapse:collapse;font-size:.88rem}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:var(--accent)}ul{columns:2;overflow-wrap:anywhere}footer{padding:24px 0;color:var(--muted);font-size:.8rem}@media(max-width:600px){body{padding:14px}.barrow{grid-template-columns:90px 1fr 55px}ul{columns:1}}
 </style><main>
-<header><small>SPEEDTV BOX · AUDITORIA E DEBLOAT</small><h1>Relatório da TV Box</h1><p>Gerado em %s</p><p>%s</p></header>
-<div class="grid">%s</div>
-<div class="columns">%s%s</div>
-<section class="panel"><h2>Métricas por etapa</h2><table><thead><tr><th>Etapa</th><th>RAM disponível</th><th>Processos</th><th>Desativados</th><th>Armazenamento livre</th></tr></thead><tbody>%s</tbody></table></section>
-<section class="panel"><h2>Pacotes desativados nesta sessão</h2><ul>%s</ul></section>
+<header><small>SPEEDTV BOX · AUDITORIA E DEBLOAT</small><h1>Relatório da TV Box</h1><p>Gerado em __DATE__</p><p>__DEVICE__</p></header>
+<div class="grid">__CARDS__</div>
+<div class="columns">__RAM_CHART____PROCESS_CHART__</div>
+<section class="panel"><h2>Métricas por etapa</h2><table><thead><tr><th>Etapa</th><th>RAM disponível</th><th>Processos</th><th>Desativados</th><th>Armazenamento livre</th></tr></thead><tbody>__ROWS__</tbody></table></section>
+<section class="panel"><h2>Pacotes desativados nesta sessão</h2><ul>__PACKAGES__</ul></section>
 <section class="panel"><h2>Como interpretar</h2><p>MemAvailable (ou livre + cache nos kernels antigos) é a referência de RAM disponível; MemFree isolado não representa a memória utilizável. Variações dependem do tempo desde o boot, cache e aplicativos abertos.</p><p>A contagem de processos é aproximada e não mede desempenho por si só.</p><p>Esta auditoria procura indicadores conhecidos e não certifica que o firmware está livre de malware.</p><p>Widevine informado pelo sistema não comprova certificação de streaming; só a reprodução protegida confirma o comportamento real.</p></section>
-<footer>SpeedTV Box · relatório local, sem bibliotecas ou serviços externos.</footer></main></html>""" % (
-        esc(agora_iso()), esc(dispositivo),
-        card("RAM física estimada", (str(antes.get("ram_real_mb")) + " MB") if antes.get("ram_real_mb") else "Não medida", antes.get("ram_fonte")),
-        card("Pacotes instalados", antes.get("pacotes"), "antes") +
-        card("Pacotes instalados", (depois or {}).get("pacotes"), "depois" if depois else "sem leitura final") +
-        card("Desativados nesta sessão", len(desligados or []), "ações registradas") +
-        card("RAM disponível", ram_antes, "antes") +
-        card("RAM disponível", ram_depois, "depois"),
-        grafico("RAM disponível ao longo das ondas", "mem_available_kb", " kB"),
-        grafico("Processos por etapa", "processos"),
-        "".join(linhas),
-        pacotes,
+<footer>SpeedTV Box · relatório local, sem bibliotecas ou serviços externos.</footer></main></html>"""
+    html_doc = (html_doc
+        .replace("__DATE__", esc(agora_iso()))
+        .replace("__DEVICE__", esc(dispositivo))
+        .replace("__CARDS__", (
+            card("RAM física estimada", (str(antes.get("ram_real_mb")) + " MB") if antes.get("ram_real_mb") else "Não medida", antes.get("ram_fonte"))
+            + card("Pacotes instalados", antes.get("pacotes"), "antes")
+            + card("Pacotes instalados", (depois or {}).get("pacotes"), "depois" if depois else "sem leitura final")
+            + card("Desativados nesta sessão", len(desligados or []), "ações registradas")
+            + card("RAM disponível", ram_antes, "antes")
+            + card("RAM disponível", ram_depois, "depois")
+        ))
+        .replace("__RAM_CHART__", grafico("RAM disponível ao longo das ondas", "mem_available_kb", " kB"))
+        .replace("__PROCESS_CHART__", grafico("Processos por etapa", "processos"))
+        .replace("__ROWS__", "".join(linhas))
+        .replace("__PACKAGES__", pacotes)
     )
     html_path = pasta / "relatorio.html"
     html_path.write_text(html_doc, encoding="utf-8")
