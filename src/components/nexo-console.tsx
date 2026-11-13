@@ -238,7 +238,7 @@ function personalizar(texto: string, ip: string, api: string): string {
   let alvo = ip.trim();
   const octetos = alvo.split(".");
   const ipValido = octetos.length === 4 && octetos.every((parte) => /^\d{1,3}$/.test(parte) && Number(parte) >= 0 && Number(parte) <= 255);
-  if (!ipValido) throw new Error("Informe somente o IP da TV Box, por exemplo: 192.168.1.100.");
+  if (!ipValido) throw new Error("Informe um endereço IPv4 válido da TV Box.");
   alvo += ":5555";
   const chave = api.trim();
   if (!/^[A-Za-z0-9_-]{20,256}$/.test(chave)) {
@@ -392,7 +392,7 @@ export function Console() {
               id="nexo-ip"
               value={ip}
               onChange={(e) => setIp(e.target.value)}
-              placeholder="Ex.: 192.168.1.100"
+              placeholder="Digite o IP da TV Box"
               autoComplete="off"
               spellCheck={false}
               suppressHydrationWarning
