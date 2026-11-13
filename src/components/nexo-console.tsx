@@ -34,7 +34,7 @@ const ONDAS = [
     n: "04",
     nome: "Relatório",
     texto:
-      "Uma pasta por sessão, com relatório HTML visual, resumo TXT, dados completos e histórico de cada alteração. O journal de reversão fica separado e persistente.",
+      "Uma pasta por sessão, com relatório HTML visual, resumo TXT, inventário de pacotes, processos agrupados por PSS, serviços ativos e histórico. O journal de reversão fica separado e persistente.",
   },
 ];
 
@@ -44,6 +44,9 @@ const MEDIDAS = [
   ["Widevine", "Lê o nível DRM. L1 não garante certificação do aplicativo, liberação de HD/4K nem compatibilidade do serviço; isso depende também do provedor e do dispositivo."],
   ["Ameaça", "Procura indicadores publicados do XCPE, como x.cpe, com.oemservice, com.abc.nexus e droppers conhecidos. Adups/OTA pode ser componente legítimo ou suspeito conforme a variante; o nome sozinho não confirma infecção. A auditoria não é um antivírus completo."],
   ["Play", "O que está desativado, escondido ou removido só para o usuário, inclusive WebView e Trichrome."],
+  ["Processos", "Agrupa processos auxiliares pelo pacote principal, soma PSS sem confundir RSS, e diferencia primeiro plano, segundo plano e cache."],
+  ["Serviços", "Lê os ServiceRecord do ActivityManager para mostrar serviços iniciados e vinculados, com pacote, componente e processo."],
+  ["Pacotes", "Cruza pm list packages -f -u, caminho do APK, origem, estado instalado/desativado/removido para o usuário e família Android/Google/fabricante."],
   ["Termux", "Cada execução cria uma pasta em Download/SpeedTV/Sessoes, organizada por data e horário, com o relatório HTML, TXT, JSON e logs daquela sessão."],
 ];
 
@@ -373,7 +376,7 @@ export function Console() {
           <h1 className="font-display text-5xl leading-none text-fg sm:text-6xl">SpeedTV Box</h1>
         </div>
         <p className="max-w-xs text-sm text-muted">
-          Gerador v12 · agente Python v12. Auditoria guiada, otimização por etapas, instaladores e relatórios organizados por sessão.
+          Gerador v13 · agente Python v13. Auditoria de pacotes, serviços ativos, PSS agrupado, otimização guiada e relatórios por sessão.
         </p>
       </header>
 
