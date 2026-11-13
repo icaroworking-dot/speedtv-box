@@ -1287,7 +1287,7 @@ def varrer_boot(adb):
     padroes="/system/etc/init/* /vendor/etc/init/* /odm/etc/init/* /product/etc/init/* /system/etc/*.sh /system/bin/*.sh"
     if root: padroes += " /oem/etc/init/* /oem/etc/*.rc /oem/*.sh /oem/bin/*.sh"
     cmd="grep -l -i -E 'xmrig|adups|coinhive|minergate|oemservice|nohup|classes.dex' "+padroes+" 2>/dev/null"
-    lista=adb.shell("%s -c '%s'"%(root,cmd),30) if root else adb.shell(cmd,25)
+    lista=adb.shell(root+" -c "+json.dumps(cmd),30) if root else adb.shell(cmd,25)
     achados=[]
     for linha in lista.splitlines():
         arq=linha.strip()
