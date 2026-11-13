@@ -950,7 +950,7 @@ def carregar_journal():
             return json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return {"disabled": [], "settings": [], "wm": {}, "ondas": [], "notas": []}
+    return {"disabled": [], "settings": [], "wm": {}, "ondas": [], "notas": [], "package_states": {}, "removidos": []}
 
 
 def salvar_journal(j):
@@ -1000,18 +1000,21 @@ def anexar_metricas(item):
         fh.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
-def escrever_rollback(serial, binary, pkgs):
+def escrever_rollback(serial, binary, pkgs, estados=None):
     pasta = garantir_dados()
+    estados = estados or {}
     linhas = ['"%s" connect %s' % (binary, serial)]
     for pkg in pkgs:
         if not validar_pacote(pkg):
             continue
-        linhas.append('"%s" -s %s shell pm enable %s' % (binary, serial, pkg))
-        linhas.append('"%s" -s %s shell pm unhide %s' % (binary, serial, pkg))
-        linhas.append('"%s" -s %s shell pm unsuspend %s' % (binary, serial, pkg))
+        estado = estados.get(pkg) or {}
+        linhas.append('"%s" -s %s shell pm install-existing --user 0 %s' % (binary, serial, pkg))
+        if estado.get("enabled") == 0:
+            linhas.append('"%s" -s %s shell pm default-state --user 0 %s' % (binary, serial, pkg))
+        else:
+            linhas.append('"%s" -s %s shell pm enable --user 0 %s' % (binary, serial, pkg))
     (pasta / "reverter.sh").write_text("#!/bin/sh\n" + "\n".join(linhas) + "\n", encoding="utf-8")
     (pasta / "reverter.bat").write_text("\r\n".join(linhas) + "\r\n", encoding="utf-8")
-
 
 def perguntar(msg, default_sim=True, forcar=None):
     if forcar is True:
@@ -1685,7 +1688,7 @@ def desativar(adb, gate, journal, pacotes, onda):
             if pkg not in journal["disabled"]:
                 journal["disabled"].append(pkg)
             salvar_journal(journal)
-            escrever_rollback(adb.serial, adb.binary, journal["disabled"])
+            escrever_rollback(adb.serial, adb.binary, journal["disabled"], journal.get("package_states"))
             say("  desativado  %s" % pkg)
             saiu = adb.shell("pm uninstall --user %s %s" % (adb.user, pkg), 20)
             if "Success" in saiu:
@@ -1716,8 +1719,7 @@ def reativar(adb, pacotes, estados=None):
         if not validar_pacote(pkg):
             continue
         estado = estados.get(pkg) or {}
-        if estado.get("removido_para_usuario"):
-            adb.shell("pm install-existing --user %s %s" % (adb.user, pkg), 18)
+        adb.shell("pm install-existing --user %s %s" % (adb.user, pkg), 18)
         if estado.get("enabled") == 0:
             adb.shell("pm default-state --user %s %s" % (adb.user, pkg), 18)
         else:
@@ -1817,7 +1819,6 @@ def onda_ajustes(adb, journal, ram_mb, video=True):
         ("global", "network_recommendations_enabled", "0"),
         ("global", "app_standby_enabled", "1"),
     ]
-    dns = setting_get(adb, "global", "private_dns_mode")
     # DNS privado é preferência de rede do usuário: nunca alterar automaticamente.
     pares.append(("global", "stay_on_while_plugged_in", "3"))
     for ns, chave, valor in pares:
@@ -1942,8 +1943,8 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
         # reaprende o home depois do boot
         home = home_package(adb) or home
 
-    titulo("Onda 4 — ajustes, sem desativar app")
-    onda_ajustes(adb, journal, ram, video=True)
+    titulo("Onda 4 — ajustes reversíveis, sem DNS ou resolução forçados")
+    onda_ajustes(adb, journal, ram, video=False)
     fim = coletar_metricas(adb, "fim")
     say(linha_metrica(fim))
     say("")
