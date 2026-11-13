@@ -3610,10 +3610,10 @@ def instalar_launcher(adb, escolha):
     catalogo = {
         "glass": {
             "nome": "Glass Launcher",
-            "api": "https://git.namillis.me/api/v1/repos/namillis/GlassLauncherTV/releases/latest",
-            "hosts": {"git.namillis.me"},
-            "pacote": "tv.glass.launcher",
-            "arquivo": "GlassLauncher.apk",
+            "api": "",
+            "hosts": set(),
+            "pacote": "com.fares.glass",
+            "arquivo": "FlareGlassLauncher.apk",
         },
         "projectivy": {
             "nome": "Projectivy Launcher",
