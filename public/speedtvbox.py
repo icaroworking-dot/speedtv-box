@@ -1202,13 +1202,19 @@ def parse_rss(texto):
 
 def frases_relatorio(r):
     frases = []
-    if (r.get("android") or {}).get("mentira"):
+    android_info = r.get("android") or {}
+    if android_info.get("mentira"):
+        esperado = android_info.get("release_esperado")
+        sdk = r.get("sdk") or "?"
+        release = r.get("release") or "?"
         frases.append(
-            "A versão de Android da etiqueta não combina com o kernel. É firmware remarcado. "
-            "App que exige a versão de verdade pode falhar mesmo a loja dizendo que serve."
+            "Há uma inconsistência nos identificadores: SDK %s corresponde à família Android %s, "
+            "mas a propriedade de versão informa %s. Isso merece investigação; isoladamente, "
+            "não prova que o firmware foi falsificado."
+            % (sdk, esperado or "?", release)
         )
     else:
-        frases.append("A versão de Android e o kernel não se contradizem, ou não deu para cravar uma mentira.")
+        frases.append("SDK, versão informada e kernel não mostram uma incompatibilidade clara.")
     if r.get("ram_mentira"):
         frases.append(
             "A RAM anunciada é maior que a medida no kernel. O número real é o que decide 1080p. "
@@ -1546,7 +1552,7 @@ def imprimir_auditoria(r):
     say("patch de segurança  : %s" % (r.get("patch") or "—"))
     say("kernel              : %s" % (r.get("kernel") or "—"))
     for nota in r.get("android", {}).get("notas", []):
-        selo = "VERSÃO MENTIROSA" if r.get("android", {}).get("mentira") else "versão"
+        selo = "INCONSISTÊNCIA" if r.get("android", {}).get("mentira") else "VERSÃO"
         say("  [%s] %s" % (selo, nota))
     say("")
     say("RAM de verdade       : %s (%s)" % (
@@ -3112,12 +3118,22 @@ def linha_android(r):
     et = r.get("release") or "?"
     sdk = r.get("sdk") or "?"
     ker = r.get("kernel") or "?"
-    if (r.get("android") or {}).get("mentira"):
+    info = r.get("android") or {}
+    esperado = info.get("release_esperado")
+    major = release_major(et)
+    if info.get("mentira") and esperado and major and major != esperado:
         return (
-            "A etiqueta diz Android %s (SDK %s). O kernel %s não sustenta essa versão. É firmware remarcado."
-            % (et, sdk, ker)
+            "SDK %s corresponde à família Android %s, mas a propriedade de versão anuncia %s. "
+            "Kernel %s, sozinho, não prova firmware remarcado."
+            % (sdk, esperado, et, ker)
         )
-    return "Android %s (SDK %s), kernel %s. Etiqueta e kernel não se contradizem." % (et, sdk, ker)
+    if info.get("mentira"):
+        return (
+            "Há inconsistência entre SDK %s, versão anunciada %s e kernel %s. "
+            "É um indício para investigar, não prova isolada de falsificação."
+            % (sdk, et, ker)
+        )
+    return "Android %s (SDK %s), kernel %s. Não achei incompatibilidade clara." % (et, sdk, ker)
 
 
 def linha_ram(r):
@@ -3395,7 +3411,7 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
         json.dumps(antes, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     journal = carregar_journal()
-    ja = set(journal.get("disabled") or [])
+    ondas_inicio = len(journal.get("ondas") or [])
 
     ruins = nomes_de_risco(antes)
     if ruins:
@@ -3437,7 +3453,12 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
     except (DeviceOffline, SystemExit, Exception):
         depois = None
     journal = carregar_journal()
-    desligados = [pkg for pkg in (journal.get("disabled") or []) if pkg not in ja]
+    ondas_novas = (journal.get("ondas") or [])[ondas_inicio:]
+    desligados = list(dict.fromkeys(
+        pkg
+        for onda in ondas_novas
+        for pkg in (onda.get("desativados") or [])
+    ))
     texto = montar_relatorio_final(antes, depois, desligados, lixo)
     log = anexar_log("relatorio", texto, texto)
     visual = gerar_relatorio_visual(antes, depois, desligados, lixo)
