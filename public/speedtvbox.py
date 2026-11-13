@@ -1454,8 +1454,11 @@ def auditar(adb, falar=True):
         "adb_enabled": adb.shell("settings get global adb_enabled 2>/dev/null", 8).strip() or None,
         "install_non_market_apps": adb.shell("settings get secure install_non_market_apps 2>/dev/null", 8).strip() or None,
     }
+    gles_prop = props.get("ro.opengles.version") or ""
+    gles_num = int(gles_prop) if gles_prop.isdigit() else 0
+    gles_label = ("OpenGL ES %d.%d (propriedade Android)" % (gles_num >> 16, gles_num & 0xffff)) if gles_num else None
     gpu = {
-        "egl": props.get("ro.hardware.egl") or props.get("ro.opengles.version") or None,
+        "egl": props.get("ro.hardware.egl") or gles_label,
         "gles": adb.shell("dumpsys SurfaceFlinger 2>/dev/null | grep -i -m 2 -E 'GLES:|OpenGL ES' ", 12).strip()[:240] or None,
     }
 
@@ -3395,6 +3398,14 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
         alertas.append("Aplicativos de terceiros possuem permissões sensíveis.")
     if android_info.get("mentira"):
         alertas.append("A versão Android declarada diverge da família indicada pelo SDK.")
+    if str(sec.get("selinux") or "").lower() == "permissive":
+        alertas.append("SELinux está em modo permissivo, reduzindo a proteção do sistema.")
+    if str(sec.get("bootloader_locked") or "") == "0":
+        alertas.append("O bootloader informa estado desbloqueado.")
+    if str(sec.get("verified_boot") or "").lower() in ("orange", "yellow"):
+        alertas.append("Verified Boot não está no estado verde de confiança.")
+    if str(sec.get("debuggable") or "") == "1" or str(sec.get("build_type") or "").lower() in ("eng", "userdebug"):
+        alertas.append("A firmware informa uma compilação de desenvolvimento/debug.")
     try:
         uso = int(str(arm.get("uso") or "0").replace("%", ""))
         if uso >= 90:
@@ -3483,6 +3494,12 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
         recommendations.append("Sem root: as operações ficam limitadas às permissões normais do ADB. O agente não tentará forçar acesso administrativo.")
     else:
         recommendations.append("Root confirmado: ferramentas avançadas podem ser oferecidas quando forem compatíveis e justificadas.")
+    if str(sec.get("bootloader_locked") or "") == "0" or str(sec.get("verified_boot") or "").lower() in ("orange", "yellow"):
+        recommendations.append("Revise a origem e a integridade da firmware antes de usar contas sensíveis; não tente bloquear o bootloader sem confirmar compatibilidade e backup.")
+    if str(sec.get("selinux") or "").lower() == "permissive":
+        recommendations.append("Não force SELinux para Enforcing com comandos genéricos: a política precisa ser compatível com a firmware.")
+    if str(sec.get("adb_enabled") or "") == "1":
+        recommendations.append("Ao terminar a manutenção, desligue a depuração ADB se não precisar mais dela.")
     if not antes.get("ram_real_mb"):
         recommendations.append("A RAM física não pôde ser confirmada por fontes suficientes; trate a estimativa com cautela.")
     if not metricas:
