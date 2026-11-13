@@ -78,7 +78,7 @@ const PASSOS = [
     n: "03",
     nome: "Baixar o agente",
     texto:
-      "Nesta página, aba Baixar. Cole o IP e a chave do Gemini. Baixe o .py. A chave fica só nesse arquivo, no seu celular. Não publique esse arquivo.",
+      "Nesta página, aba Preparar agente. Cole o IP e a chave do Gemini, toque em Gerar .py e depois no link Salvar .py. A chave fica dentro desse arquivo. Não o publique.",
   },
   {
     n: "04",
@@ -390,7 +390,7 @@ export function Console() {
           </div>
           <div>
             <p className="font-display text-2xl text-fg">2. Baixe</p>
-            <p className="mt-1 text-sm leading-relaxed text-muted">Toque em Baixar .py. O arquivo já sai personalizado para seu aparelho.</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted">Toque em Gerar .py e depois em Salvar .py. O arquivo já sai personalizado para seu aparelho.</p>
           </div>
           <div>
             <p className="font-display text-2xl text-fg">3. Execute</p>
@@ -441,6 +441,7 @@ export function Console() {
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-amber px-4 text-sm font-semibold text-amber-ink"
               onClick={() =>
                 void comPersonalizado((t) => {
+                  setDownloadTxt("");
                   setDownloadPy(criarArquivo(t));
                   setAviso("Agente personalizado pronto. Agora toque em “Salvar .py” logo abaixo.");
                 })
@@ -454,6 +455,7 @@ export function Console() {
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-bg-raised px-4 text-sm text-fg"
               onClick={() =>
                 void comPersonalizado((t) => {
+                  setDownloadPy("");
                   setDownloadTxt(criarArquivo(t));
                   setAviso("Arquivo de texto pronto. Agora toque em “Salvar .txt” logo abaixo.");
                 })
@@ -509,7 +511,7 @@ export function Console() {
 
         <aside className="rounded-2xl border border-line bg-bg-raised p-5">
           <p className="font-display text-2xl text-fg">No Termux</p>
-          <p className="mt-3 text-sm text-muted">Baixe o .py. Cole isto inteiro, de uma vez:</p>
+          <p className="mt-3 text-sm text-muted">Gere e salve o .py. Depois cole isto inteiro, de uma vez:</p>
           <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-fg">{BLOCO_TERMUX}</pre>
           <button
             type="button"
