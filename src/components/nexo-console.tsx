@@ -340,7 +340,7 @@ export function Console() {
           className={`inline-flex min-h-11 items-center rounded-xl px-4 text-sm ${aba === "baixar" ? "bg-amber font-semibold text-amber-ink" : "border border-line text-fg"}`}
           onClick={() => setAba("baixar")}
         >
-          Baixar
+          Preparar agente
         </button>
         <button
           type="button"
@@ -348,7 +348,7 @@ export function Console() {
           className={`inline-flex min-h-11 items-center rounded-xl px-4 text-sm ${aba === "tutorial" ? "bg-amber font-semibold text-amber-ink" : "border border-line text-fg"}`}
           onClick={() => setAba("tutorial")}
         >
-          Tutorial
+          Passo a passo
         </button>
       </div>
 
