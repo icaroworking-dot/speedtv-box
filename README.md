@@ -33,7 +33,7 @@ Na primeira execução, escolha **1 — Começar**. O assistente conduz a audito
 - Usa listas de proteção, identifica launcher/teclado/serviços ativos e evita remoção em massa de pacotes de sistema desconhecidos.
 - Detecta indicadores conhecidos de Adups/XCPE e outros pacotes suspeitos. Isso não é garantia de que o firmware esteja limpo.
 - Registra o estado anterior dos pacotes e oferece reversão; gera script de recuperação.
-- Gera TXT, JSON e um relatório HTML offline com gráficos e métricas por etapa.
+- Gera um relatório HTML offline com painel visual, ficha técnica, CPU/GPU, temperatura quando exposta, segurança do Android, gráficos e métricas; também salva TXT e JSON completos.\n- Cada execução cria `Download/SpeedTV/Sessoes/Sessao_AAAA-MM-DD_HH-MM-SS/`, com registro da sessão, auditorias, métricas, diagnósticos e relatório. O nome da pasta pode receber um apelido opcional via `--cliente`; o journal de reversão continua separado e persistente, para não perder o histórico entre sessões.
 - Menu guiado: auditoria, diagnóstico, memória/armazenamento, instaladores, segurança, recuperação e ferramentas.
 - Modo sem Google opcional: permite desativar/reativar separadamente GMS, GSF, Play Store e serviços auxiliares. Não desinstala APKs e avisa sobre dependências.
 - Diagnóstico de rede para IPTV: Wi-Fi, RSSI/link, interfaces, rotas, DNS e testes básicos de latência/resolução. Não muda DNS, MTU ou rádio automaticamente.
@@ -58,7 +58,7 @@ Na primeira execução, escolha **1 — Começar**. O assistente conduz a audito
 
 ## Relatórios
 
-Os arquivos ficam em `Download/SpeedTV` quando o Termux tem permissão de armazenamento; caso contrário, ficam em `$HOME/speedtv-dados`. O HTML abre localmente e não depende de CDN.
+Os arquivos de cada execução ficam em `Download/SpeedTV/Sessoes/` quando o Termux tem permissão de armazenamento; caso contrário, ficam em `$HOME/speedtv-dados/Sessoes/`. Cada pasta recebe nomes amigáveis e data/hora. O relatório HTML abre localmente e não depende de CDN. O journal de reversão fica separado em `$HOME/speedtv-dados/journal.json`, persistindo entre execuções. Para identificar a sessão com um apelido: `python speedtvbox.py --cliente sala`.
 
 ## Testes
 
