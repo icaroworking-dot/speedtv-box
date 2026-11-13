@@ -1291,7 +1291,7 @@ def varrer_boot(adb):
     achados=[]
     for linha in lista.splitlines():
         arq=linha.strip()
-        if not re.match(r"^/[\\w./\\-]+$",arq): continue
+        if not re.match(r"^/[\w./\-]+$",arq): continue
         nome=arq.rsplit("/",1)[-1]
         protegido=nome in ("init.rc","init.environ.rc","ueventd.rc","bootanim.rc") or nome.startswith("init.")
         leitura="head -c 400 %s 2>/dev/null"%arq
@@ -1310,7 +1310,7 @@ def afastar_scripts(adb,journal,itens):
         arq=item.get("arquivo") or ""
         if item.get("protegido"):
             say("  protegido, não alterei: "+arq); continue
-        if not re.match(r"^/[\\w./\\-]+$",arq): continue
+        if not re.match(r"^/[\w./\-]+$",arq): continue
         bak=arq+".speedtv-bak"
         if "EXISTE" in adb.shell("%s -c '[ -e %s ] && echo EXISTE'"%(root,bak),12):
             say("  backup já existe; não sobrescrevi: "+bak); continue
@@ -2032,8 +2032,8 @@ def reverter(adb, sim=False):
         for item in scripts:
             origem, bak = item.get("de") or "", item.get("bak") or ""
             if root and re.match(r"^/[\w./\-]+$", origem) and re.match(r"^/[\w./\-]+$", bak):
-                out = adb.shell("%s -c 'if [ -e %s ]; then mv %s %s && echo SPEEDTV_RESTORED; else echo SPEEDTV_MISSING; fi'" % (root, bak, bak, origem), 20)
-                if "SPEEDTV_RESTORED" in out or "SPEEDTV_MISSING" in out:
+                out = adb.shell("%s -c 'if [ -e %s ]; then mv %s %s && echo SPEEDTV_RESTORED; elif [ -e %s ]; then echo SPEEDTV_ALREADY; else echo SPEEDTV_MISSING; fi'" % (root, bak, bak, origem, origem), 20)
+                if "SPEEDTV_RESTORED" in out or "SPEEDTV_ALREADY" in out:
                     say("  script restaurado/backup ausente: %s" % origem)
                 else:
                     scripts_pendentes.append(item)
@@ -3934,10 +3934,10 @@ def gerenciar_ota(adb):
 
 def registrar_relatorio_operacional(tipo,resumo,dados):
     pasta=garantir_dados(); registro={"quando":agora_iso(),"tipo":tipo,"resumo":resumo,"dados":dados}
-    with (pasta/"diagnosticos.jsonl").open("a",encoding="utf-8") as fh: fh.write(json.dumps(registro,ensure_ascii=False)+"\\n")
+    with (pasta/"diagnosticos.jsonl").open("a",encoding="utf-8") as fh: fh.write(json.dumps(registro,ensure_ascii=False)+"\n")
     base="%s_%s"%(datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),_nome_arquivo(tipo))
     bruto=json.dumps(dados,indent=2,ensure_ascii=False)
-    txt=pasta/(base+".txt"); txt.write_text("SpeedTV Box — %s\\nQuando: %s\\n\\nRESUMO\\n%s\\n\\nDETALHES TÉCNICOS\\n%s\\n"%(tipo,registro["quando"],resumo,bruto),encoding="utf-8")
+    txt=pasta/(base+".txt"); txt.write_text("SpeedTV Box — %s\nQuando: %s\n\nRESUMO\n%s\n\nDETALHES TÉCNICOS\n%s\n"%(tipo,registro["quando"],resumo,bruto),encoding="utf-8")
     h=pasta/(base+".html"); h.write_text("<!doctype html><html lang='pt-BR'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>SpeedTV Box — %s</title><style>body{font:16px system-ui;background:#07101f;color:#eef5ff;max-width:900px;margin:32px auto;padding:0 18px}article{background:#101d31;border:1px solid #263852;border-radius:14px;padding:18px;margin:14px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#c5d4e8;font-size:13px}</style><h1>SpeedTV Box — %s</h1><article><h2>Resumo</h2><p>%s</p></article><article><h2>Registro técnico</h2><pre>%s</pre></article></html>"%tuple(html.escape(x) for x in (tipo,tipo,resumo,bruto)),encoding="utf-8")
     say("Relatórios: %s | %s"%(publicar_relatorio(txt) or txt,publicar_relatorio(h) or h))
     return registro
@@ -3963,7 +3963,7 @@ def auditar_rede(adb):
     say("• Perda %s | latência %s | DNS %s"%(("%s%%"%loss) if loss is not None else "não medida",("%.1f ms"%avg) if avg is not None else "não medida","respondeu" if dns_ok else "não confirmado"))
     say("• Link reportado %s Mbps (não é velocidade real da internet)."%(speed if speed is not None else "—"))
     can=sleep!="2"
-    if can: say("  1 Manter Wi-Fi acordado enquanto ligado à energia (reversível)\\n  2 Teste estendido\\n  3 Aplicar ajuste e testar")
+    if can: say("  1 Manter Wi-Fi acordado enquanto ligado à energia (reversível)\n  2 Teste estendido\n  3 Aplicar ajuste e testar")
     else: say("Wi-Fi já fica acordado. 1 = teste estendido.")
     try: choice=input("Escolha (0 para sair): ").strip()
     except EOFError: choice="0"
