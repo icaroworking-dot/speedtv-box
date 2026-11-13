@@ -3663,8 +3663,15 @@ def instalar_launcher(adb, escolha):
     if perguntar("A nova tela inicial apareceu corretamente ao apertar HOME?", True):
         _desativar_launcher_antigo(adb, antigo, item["pacote"])
     else:
-        say("Mantive o launcher antigo. A troca não foi considerada concluída.")
-        say("Você pode abrir o novo launcher manualmente e escolher 'Sempre' na tela do Android.")
+        say("O teste do botão HOME não passou. Vou tentar restaurar a tela inicial anterior.")
+        if antigo:
+            voltou, _detalhe = _definir_launcher(adb, antigo)
+            if voltou:
+                say("Launcher anterior restaurado como HOME. O novo aplicativo continua instalado.")
+            else:
+                say("Não consegui restaurar automaticamente. O launcher antigo continua habilitado; selecione-o em Apps padrão → App de início.")
+        else:
+            say("Não havia um launcher anterior identificado. O novo continua instalado, mas não desativei nenhum pacote.")
 
 
 def abrir_ou_instalar_downloader(adb):
