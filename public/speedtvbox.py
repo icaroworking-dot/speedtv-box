@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import html
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -35,7 +37,7 @@ DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "7"
+VERSAO = "8"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -308,6 +310,10 @@ BAD_EXACT = {
     # firmware, se reinstala a partir de /oem e aluga o IP da casa.
     "com.oemservice",
     "x.cpe",
+    "com.abc.nexus",
+    "com.android.system.ntp",
+    "com.android.sso.auth.handler",
+    "com.ota.service",
     "com.sdt.ota",
     "com.sdt.backupappmanger",
     "com.sdt.producttest",
@@ -945,7 +951,7 @@ def carregar_journal():
             return json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return {"disabled": [], "settings": [], "wm": {}, "ondas": [], "notas": []}
+    return {"disabled": [], "settings": [], "wm": {}, "ondas": [], "notas": [], "package_states": {}, "removidos": []}
 
 
 def salvar_journal(j):
@@ -995,18 +1001,21 @@ def anexar_metricas(item):
         fh.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
-def escrever_rollback(serial, binary, pkgs):
+def escrever_rollback(serial, binary, pkgs, estados=None):
     pasta = garantir_dados()
+    estados = estados or {}
     linhas = ['"%s" connect %s' % (binary, serial)]
     for pkg in pkgs:
         if not validar_pacote(pkg):
             continue
-        linhas.append('"%s" -s %s shell pm enable %s' % (binary, serial, pkg))
-        linhas.append('"%s" -s %s shell pm unhide %s' % (binary, serial, pkg))
-        linhas.append('"%s" -s %s shell pm unsuspend %s' % (binary, serial, pkg))
+        estado = estados.get(pkg) or {}
+        linhas.append('"%s" -s %s shell pm install-existing --user 0 %s' % (binary, serial, pkg))
+        if estado.get("enabled") == 0:
+            linhas.append('"%s" -s %s shell pm default-state --user 0 %s' % (binary, serial, pkg))
+        else:
+            linhas.append('"%s" -s %s shell pm enable --user 0 %s' % (binary, serial, pkg))
     (pasta / "reverter.sh").write_text("#!/bin/sh\n" + "\n".join(linhas) + "\n", encoding="utf-8")
     (pasta / "reverter.bat").write_text("\r\n".join(linhas) + "\r\n", encoding="utf-8")
-
 
 def perguntar(msg, default_sim=True, forcar=None):
     if forcar is True:
@@ -1487,6 +1496,9 @@ def auditar(adb, falar=True):
         "pacotes": len(packages),
         "sistema": len(sistema),
         "terceiros": len(terceiros),
+        "pacotes_instalados": sorted(packages),
+        "pacotes_sistema": sorted(sistema),
+        "pacotes_terceiros": sorted(terceiros),
         "desativados": sorted(desativados),
         "removidos_pilha": [p for p in removidos if p in PLAY_STACK or p in PROTECTED_EXACT],
         "play": play_estado,
@@ -1635,17 +1647,10 @@ KEEP_FUNDO = (
 
 
 def candidatos_profundos(nomes, gate):
-    fora = []
-    for nome in sorted(nomes or []):
-        if not validar_pacote(nome):
-            continue
-        if gate and gate.motivo(nome):
-            continue
-        low = nome.lower()
-        if any(bit in low for bit in KEEP_FUNDO):
-            continue
-        fora.append(nome)
-    return fora
+    # Serviços proprietários podem ser essenciais mesmo sem nome óbvio.
+    # Não oferecer remoção em massa de pacotes desconhecidos em hardware variado.
+    conhecidos = set(WAVE1) | set(WAVE2) | set(WAVE3) | set(BAD_EXACT)
+    return [nome for nome in sorted(set(nomes or [])) if nome in conhecidos and not (gate and gate.motivo(nome))]
 
 
 def desativar(adb, gate, journal, pacotes, onda):
@@ -1673,6 +1678,10 @@ def desativar(adb, gate, journal, pacotes, onda):
         if code in (2, 3, 4):
             pulou.append((pkg, "já estava desativado"))
             continue
+        journal.setdefault("package_states", {}).setdefault(pkg, {
+            "enabled": code, "removido_para_usuario": False, "quando": agora_iso(),
+        })
+        salvar_journal(journal)
         out = adb.shell("pm disable-user --user %s %s" % (adb.user, pkg), 20)
         low = out.lower()
         if "new state: disabled" in low:
@@ -1680,14 +1689,17 @@ def desativar(adb, gate, journal, pacotes, onda):
             if pkg not in journal["disabled"]:
                 journal["disabled"].append(pkg)
             salvar_journal(journal)
-            escrever_rollback(adb.serial, adb.binary, journal["disabled"])
+            escrever_rollback(adb.serial, adb.binary, journal["disabled"], journal.get("package_states"))
             say("  desativado  %s" % pkg)
             saiu = adb.shell("pm uninstall --user %s %s" % (adb.user, pkg), 20)
             if "Success" in saiu:
                 journal.setdefault("removidos", []).append(pkg)
+                journal.setdefault("package_states", {}).setdefault(pkg, {})["removido_para_usuario"] = True
                 salvar_journal(journal)
                 say("  removido para o usuário  %s (volta com Desfazer)" % pkg)
         else:
+            journal.get("package_states", {}).pop(pkg, None)
+            salvar_journal(journal)
             pulou.append((pkg, (out or "sem confirmação").strip().splitlines()[-1][:160]))
     journal.setdefault("ondas", []).append({
         "onda": onda, "quando": agora_iso(), "desativados": mudou,
@@ -1698,25 +1710,29 @@ def desativar(adb, gate, journal, pacotes, onda):
 
 
 def candidatos_onda2(sistema):
-    extra = []
-    for nome in sorted(sistema):
-        low = nome.lower()
-        if any(bit in low for bit in WAVE2_CONTAINS) or nome in BAD_EXACT or any(b in low for b in BAD_BITS):
-            extra.append(nome)
-    return extra
+    # Não desativar pacotes desconhecidos por substring genérica (ex.: "ota" ou "recommend").
+    # Só entram indicadores de malware explicitamente conhecidos.
+    return [nome for nome in sorted(sistema) if nome in BAD_EXACT or any(bit in nome.lower() for bit in BAD_BITS)]
 
 
-def reativar(adb, pacotes):
+def reativar(adb, pacotes, estados=None):
     feitos = []
+    estados = estados or {}
     for pkg in pacotes:
         if not validar_pacote(pkg):
             continue
+        estado = estados.get(pkg) or {}
         adb.shell("pm install-existing --user %s %s" % (adb.user, pkg), 18)
-        adb.shell("pm enable --user %s %s" % (adb.user, pkg), 18)
+        if estado.get("enabled") == 0:
+            resultado = adb.shell("pm default-state --user %s %s" % (adb.user, pkg), 18)
+            if "unknown command" in resultado.lower() or "unknown" in resultado.lower():
+                adb.shell("pm enable --user %s %s" % (adb.user, pkg), 18)
+        else:
+            adb.shell("pm enable --user %s %s" % (adb.user, pkg), 18)
         adb.shell("pm unhide --user %s %s" % (adb.user, pkg), 15)
         adb.shell("pm unsuspend --user %s %s" % (adb.user, pkg), 15)
         feitos.append(pkg)
-        say("  reativado   %s" % pkg)
+        say("  estado anterior restaurado  %s" % pkg)
     return feitos
 
 
@@ -1805,15 +1821,10 @@ def onda_ajustes(adb, journal, ram_mb, video=True):
         ("global", "window_animation_scale", "0.5"),
         ("global", "transition_animation_scale", "0.5"),
         ("global", "animator_duration_scale", "0.5"),
-        ("global", "wifi_sleep_policy", "2"),
         ("global", "network_recommendations_enabled", "0"),
-        ("global", "ble_scan_always_enabled", "0"),
         ("global", "app_standby_enabled", "1"),
     ]
-    dns = setting_get(adb, "global", "private_dns_mode")
-    if dns in ("", "null", "off", "opportunistic"):
-        pares.append(("global", "private_dns_mode", "hostname"))
-        pares.append(("global", "private_dns_specifier", "dns.google"))
+    # DNS privado é preferência de rede do usuário: nunca alterar automaticamente.
     pares.append(("global", "stay_on_while_plugged_in", "3"))
     for ns, chave, valor in pares:
         ok, msg = setting_put(adb, journal, ns, chave, valor)
@@ -1865,7 +1876,7 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
     say("Onda 1, %d aplicativos (telefone, impressão, telemetria)." % len(o1))
     say("Onda 2, %d aplicativos (anúncio, recomendação, app de telefone e o que está gastando RAM à toa)." % len(o2))
     say("Onda 3, %d pacotes (Chrome, arquivos, relógio, OTA da placa) — pesa mais." % len(o3))
-    say("Onda 4, ajustes: animação 0.5, Wi-Fi sem dormir, DNS, cache, 1080p se a RAM real for baixa.")
+    say("Onda 4, ajustes reversíveis: animação, recomendações, cache e modo ligado na tomada. DNS e resolução ficam intactos.")
     if not perguntar("Executar as ondas 1, 2 e 4?", default_sim=True, forcar=True if sim else None):
         say("Cancelado. Nada foi desativado.")
         return
@@ -1917,25 +1928,28 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
             salvar_journal(journal)
             return
         ok, motivo = saudavel(adb, home, vend_antes, gms_antes)
-        depois = coletar_metricas(adb, "depois-onda-%d" % numero)
+        depois = coletar_metricas(adb, "depois-onda-%s" % numero)
         say(linha_metrica(depois))
         if not ok:
-            say("A onda %d não passou na checagem: %s" % (numero, motivo))
+            say("A onda %s não passou na checagem: %s" % (numero, motivo))
             say("Revertendo só esta onda e reiniciando.")
-            reativar(adb, mudou)
+            reativar(adb, mudou, journal.get("package_states"))
             journal["disabled"] = [p for p in journal["disabled"] if p not in mudou]
+            journal["removidos"] = [p for p in journal.get("removidos", []) if p not in mudou]
+            for pkg in mudou:
+                journal.get("package_states", {}).pop(pkg, None)
             journal["falha"] = {"onda": numero, "quando": agora_iso(), "motivo": motivo}
             salvar_journal(journal)
             escrever_rollback(adb.serial, adb.binary, journal["disabled"])
             reiniciar_esperar(adb)
-            say("Parei na onda %d. As ondas anteriores continuam. Rode auditoria de novo." % numero)
+            say("Parei na onda %s. As ondas anteriores continuam. Rode auditoria de novo." % numero)
             return
         say("Onda %d estável. %s" % (numero, motivo))
         # reaprende o home depois do boot
         home = home_package(adb) or home
 
-    titulo("Onda 4 — ajustes, sem desativar app")
-    onda_ajustes(adb, journal, ram, video=True)
+    titulo("Onda 4 — ajustes reversíveis, sem DNS ou resolução forçados")
+    onda_ajustes(adb, journal, ram, video=False)
     fim = coletar_metricas(adb, "fim")
     say(linha_metrica(fim))
     say("")
@@ -1951,7 +1965,7 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
 def reverter(adb, sim=False):
     titulo("Reverter")
     journal = carregar_journal()
-    pkgs = list(journal.get("disabled") or [])
+    pkgs = list(dict.fromkeys((journal.get("disabled") or []) + list((journal.get("package_states") or {}).keys())))
     tem_oem = bool(journal.get("oemcrypto"))
     scripts = list(journal.get("scripts") or [])
     if not pkgs and not journal.get("settings") and not journal.get("wm") and not tem_oem and not scripts:
@@ -1965,7 +1979,7 @@ def reverter(adb, sim=False):
         return
     conectar_ou_explicar(adb)
     adb.refresh_user()
-    reativar(adb, pkgs)
+    reativar(adb, pkgs, journal.get("package_states"))
     for item in reversed(journal.get("settings") or []):
         antigo = item.get("antigo")
         ns, chave = item.get("ns"), item.get("chave")
@@ -1992,6 +2006,8 @@ def reverter(adb, sim=False):
             else:
                 say("  não consegui devolver %s" % origem)
     journal["disabled"] = []
+    journal["package_states"] = {}
+    journal["removidos"] = []
     journal["settings"] = []
     journal["wm"] = {}
     journal["scripts"] = []
@@ -2063,8 +2079,7 @@ def ajustar_rede(adb, sim=False):
     titulo("Rede")
     conectar_ou_explicar(adb)
     journal = carregar_journal()
-    say("Wi-Fi dorme com a tela? Vou pedir política 'nunca' (wifi_sleep_policy=2).")
-    say("DNS privado: se estiver desligado, aponto para dns.google. Se você já escolheu um, eu não troco.")
+    say("Vou aplicar apenas os ajustes gerais reversíveis. Não altero o DNS, o Bluetooth ou a política de sono do Wi-Fi.")
     if not perguntar("Aplicar?", True, True if sim else None):
         return
     onda_ajustes(adb, journal, ram_mb=99999, video=False)
@@ -2074,7 +2089,7 @@ def ajustar_rede(adb, sim=False):
     if perguntar("Desligar a checagem de portal cativo?", False, False if sim else None):
         ok, msg = setting_put(adb, journal, "global", "captive_portal_mode", "0")
         say(msg if ok else "não apliquei: " + msg)
-    say("Feito. Reverter desfaz o DNS e o sono do Wi-Fi se o SpeedTV Box tiver mudado.")
+    say("Feito. O DNS e as opções de rádio permaneceram como estavam.")
 
 
 def forcar_1080(adb, sim=False):
@@ -2443,9 +2458,10 @@ def playstore(adb, sim=False):
 
     tags3 = classificar_log(tenta.get("log", ""))
     if "ssl_hora" in tags3 or "rede" in tags3:
-        say("Log cheira a certificado ou rede. Forçando DNS dns.google.")
-        setting_put(adb, journal, "global", "private_dns_mode", "hostname")
-        setting_put(adb, journal, "global", "private_dns_specifier", "dns.google")
+        say("O log sugere problema de certificado ou rede. O DNS privado pode ser testado, mas muda a configuração de rede.")
+        if perguntar("Trocar o DNS privado para dns.google agora?", False, False if sim else None):
+            setting_put(adb, journal, "global", "private_dns_mode", "hostname")
+            setting_put(adb, journal, "global", "private_dns_specifier", "dns.google")
 
     say("")
     say("8) Reinício e teste de novo. Várias falhas de GMS só assentam depois do boot.")
@@ -3049,8 +3065,8 @@ def diagnostico(adb):
 
 def afinar(adb, sim=False):
     titulo("Afinar")
-    say("Junta o que antes estava espalhado: cache, TV Box ligada na tomada,")
-    say("DNS, Wi-Fi sem dormir, ZRAM se houver root, e 1080p se a RAM for baixa.")
+    say("Junta ajustes reversíveis: animações, recomendações, cache e permanência")
+    say("ligada na tomada. Não força DNS, Bluetooth, Wi-Fi nem resolução de vídeo.")
     say("Não desativa aplicativo. Reverter desfaz os ajustes.")
     conectar_ou_explicar(adb)
     if not perguntar("Aplicar o conjunto?", True, True if sim else None):
@@ -3058,7 +3074,7 @@ def afinar(adb, sim=False):
     journal = carregar_journal()
     rel = auditar(adb, falar=False)
     say(limpar_cache_silencioso(adb))
-    onda_ajustes(adb, journal, rel.get("ram_real_mb"), video=True)
+    onda_ajustes(adb, journal, rel.get("ram_real_mb"), video=False)
     root = tem_root(adb)
     if root:
         limpar_zram(adb, sim=sim)
@@ -3094,13 +3110,12 @@ def linha_android(r):
 
 def linha_ram(r):
     real = r.get("ram_real_mb")
-    livre = kb_mb(r.get("ram_disponivel_kb"))
     fonte = r.get("ram_fonte") or "meminfo"
-    base = "RAM de verdade: %s, lida em %s. Sem uso: %s. Usável (sem uso + cache): %s." % (
+    base = "RAM física estimada: %s, lida em %s. MemFree: %s. Disponível para apps (MemAvailable ou livre + cache): %s." % (
         ("%d MB" % real) if real else "não medida",
         fonte,
-        livre,
-        kb_mb(r.get("ram_usavel_kb")),
+        kb_mb(r.get("ram_livre_kb")),
+        kb_mb(r.get("ram_usavel_kb") or r.get("ram_disponivel_kb")),
     )
     if r.get("ram_mentira"):
         vitrine = ", ".join("%s MB" % a["mb"] for a in r["ram_mentira"] if a.get("mb"))
@@ -3148,6 +3163,138 @@ def mostrar_leitura(r, lixo):
         say("Não achei Netflix, Kodi, Prime ou Disney pré-instalados.")
     say("Não mexo em Play Store, serviços do Google, WebView, launcher, teclado, HDMI nem no vídeo do sistema.")
     say("Calendário, telefone, mapa e impressão podem sair. Não são codec.")
+
+
+
+def gerar_relatorio_visual(antes, depois, desligados, lixo):
+    """Gera um relatório HTML offline e JSON com inventário e métricas por etapa."""
+    pasta = garantir_dados()
+    metricas = []
+    arquivo_metricas = pasta / "metricas.jsonl"
+    if arquivo_metricas.is_file():
+        try:
+            for linha in arquivo_metricas.read_text(encoding="utf-8").splitlines():
+                try:
+                    item = json.loads(linha)
+                    if isinstance(item, dict):
+                        metricas.append(item)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    # O relatório representa a execução mais recente, não mistura medições antigas.
+    inicios = [i for i, item in enumerate(metricas) if item.get("etiqueta") == "antes"]
+    if inicios:
+        metricas = metricas[inicios[-1]:]
+
+    dados = {
+        "gerado_em": agora_iso(),
+        "dispositivo": {
+            "marca": antes.get("marca"), "modelo": antes.get("modelo"),
+            "plataforma": antes.get("plataforma"), "abi": antes.get("abi"),
+            "android": antes.get("release"), "sdk": antes.get("sdk"),
+            "kernel": antes.get("kernel"),
+        },
+        "antes": antes,
+        "depois": depois,
+        "desativados_nesta_sessao": desligados or [],
+        "apps_de_fabrica_detectados": [
+            {"pacote": pkg, "nome": nome} for pkg, nome in (lixo or [])
+        ],
+        "metricas_por_etapa": metricas,
+    }
+    json_path = pasta / "relatorio.json"
+    json_path.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def esc(valor):
+        return html.escape(str(valor if valor is not None else "—"))
+
+    def card(rotulo, valor, detalhe=""):
+        return '<article class="card"><small>%s</small><strong>%s</strong><span>%s</span></article>' % (
+            esc(rotulo), esc(valor), esc(detalhe)
+        )
+
+    def grafico(titulo_grafico, chave, unidade=""):
+        valores = []
+        for item in metricas:
+            valor = item.get(chave)
+            if isinstance(valor, (int, float)):
+                valores.append((item.get("etiqueta") or "etapa", valor))
+        if not valores:
+            return '<section class="panel"><h2>%s</h2><p>Sem amostras suficientes.</p></section>' % esc(titulo_grafico)
+        maximo = max([v for _, v in valores] + [1])
+        barras = []
+        for nome, valor in valores:
+            largura = max(2, min(100, int((valor / maximo) * 100)))
+            barras.append(
+                '<div class="barrow"><label>%s</label><div class="track"><i style="width:%d%%"></i></div><b>%s%s</b></div>'
+                % (esc(nome), largura, esc(round(valor, 1)), esc(unidade))
+            )
+        return '<section class="panel"><h2>%s</h2>%s</section>' % (esc(titulo_grafico), "".join(barras))
+
+    linhas = []
+    for item in metricas:
+        linhas.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            esc(item.get("etiqueta")),
+            esc(kb_mb(item.get("mem_available_kb"))),
+            esc(item.get("processos")),
+            esc(item.get("desativados")),
+            esc(kb_mb(item.get("data_livre_kb"))),
+        ))
+    if not linhas:
+        linhas.append("<tr><td colspan='5'>Sem métricas coletadas.</td></tr>")
+    pacotes = "".join("<li>%s</li>" % esc(pkg) for pkg in (desligados or []))
+    if not pacotes:
+        pacotes = "<li>Nenhum pacote desativado nesta sessão.</li>"
+
+    dispositivo = "%s %s · %s · Android %s (SDK %s) · kernel %s" % (
+        antes.get("marca") or "Marca não identificada",
+        antes.get("modelo") or "",
+        antes.get("plataforma") or "SoC não identificado",
+        antes.get("release") or "?",
+        antes.get("sdk") or "?",
+        antes.get("kernel") or "?",
+    )
+    ram_antes = kb_mb(antes.get("ram_usavel_kb") or antes.get("ram_disponivel_kb"))
+    ram_depois = kb_mb((depois or {}).get("ram_usavel_kb") or (depois or {}).get("ram_disponivel_kb"))
+    html_doc = """<!doctype html>
+<html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SpeedTV Box — Relatório</title>
+<style>
+:root{color-scheme:dark;--bg:#07101f;--panel:#101d31;--line:#263852;--text:#eef5ff;--muted:#a8b8cf;--accent:#65d8f2}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0,#152b48,var(--bg) 45%);color:var(--text);font:15px system-ui,sans-serif;padding:24px}
+main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid var(--line)}h1{font-size:clamp(2rem,5vw,3.5rem);margin:5px 0}h2{font-size:1.15rem;margin:0 0 18px}p,small,span{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0}
+.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}.card small,.card strong,.card span{display:block}.card strong{font-size:1.65rem;margin:8px 0;color:var(--text)}.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:14px 0}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:12px 0;font-size:.85rem}.track{height:10px;background:#24354d;border-radius:99px;overflow:hidden}.track i{display:block;height:100%;background:linear-gradient(90deg,#3d9edb,var(--accent));border-radius:99px}.barrow b{text-align:right}.panel{margin:14px 0;overflow:auto}table{width:100%;border-collapse:collapse;font-size:.88rem}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:var(--accent)}ul{columns:2;overflow-wrap:anywhere}footer{padding:24px 0;color:var(--muted);font-size:.8rem}@media(max-width:600px){body{padding:14px}.barrow{grid-template-columns:90px 1fr 55px}ul{columns:1}}
+</style><main>
+<header><small>SPEEDTV BOX · AUDITORIA E DEBLOAT</small><h1>Relatório da TV Box</h1><p>Gerado em __DATE__</p><p>__DEVICE__</p></header>
+<div class="grid">__CARDS__</div>
+<div class="columns">__RAM_CHART____PROCESS_CHART__</div>
+<section class="panel"><h2>Métricas por etapa</h2><table><thead><tr><th>Etapa</th><th>RAM disponível</th><th>Processos</th><th>Desativados</th><th>Armazenamento livre</th></tr></thead><tbody>__ROWS__</tbody></table></section>
+<section class="panel"><h2>Pacotes desativados nesta sessão</h2><ul>__PACKAGES__</ul></section>
+<section class="panel"><h2>Como interpretar</h2><p>MemAvailable (ou livre + cache nos kernels antigos) é a referência de RAM disponível; MemFree isolado não representa a memória utilizável. Variações dependem do tempo desde o boot, cache e aplicativos abertos.</p><p>A contagem de processos é aproximada e não mede desempenho por si só.</p><p>Esta auditoria procura indicadores conhecidos e não certifica que o firmware está livre de malware.</p><p>Widevine informado pelo sistema não comprova certificação de streaming; só a reprodução protegida confirma o comportamento real.</p></section>
+<footer>SpeedTV Box · relatório local, sem bibliotecas ou serviços externos.</footer></main></html>"""
+    html_doc = (html_doc
+        .replace("__DATE__", esc(agora_iso()))
+        .replace("__DEVICE__", esc(dispositivo))
+        .replace("__CARDS__", (
+            card("RAM física estimada", (str(antes.get("ram_real_mb")) + " MB") if antes.get("ram_real_mb") else "Não medida", antes.get("ram_fonte"))
+            + card("Pacotes instalados", antes.get("pacotes"), "antes")
+            + card("Pacotes instalados", (depois or {}).get("pacotes"), "depois" if depois else "sem leitura final")
+            + card("Desativados nesta sessão", len(desligados or []), "ações registradas")
+            + card("RAM disponível", ram_antes, "antes")
+            + card("RAM disponível", ram_depois, "depois")
+        ))
+        .replace("__RAM_CHART__", grafico("RAM disponível ao longo das ondas", "mem_available_kb", " kB"))
+        .replace("__PROCESS_CHART__", grafico("Processos por etapa", "processos"))
+        .replace("__ROWS__", "".join(linhas))
+        .replace("__PACKAGES__", pacotes)
+    )
+    html_path = pasta / "relatorio.html"
+    html_path.write_text(html_doc, encoding="utf-8")
+    return {
+        "html": publicar_relatorio(html_path) or html_path,
+        "json": publicar_relatorio(json_path) or json_path,
+    }
 
 
 def montar_relatorio_final(antes, depois, desligados, lixo):
@@ -3224,7 +3371,7 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
     say("3. Limpar em ondas. Se a imagem não voltar, a onda é desfeita.")
     say("4. Salvar o relatório em Download/SpeedTV.")
     say("")
-    say("Faça isto depois do reset de fábrica, com a depuração ligada.")
+    say("Não é necessário resetar a TV Box. Faça backup do que importa e deixe a depuração ligada.")
     if not perguntar("Começar?", True, True if sim else None):
         say("Nada foi feito.")
         return
@@ -3281,9 +3428,13 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
     desligados = [pkg for pkg in (journal.get("disabled") or []) if pkg not in ja]
     texto = montar_relatorio_final(antes, depois, desligados, lixo)
     log = anexar_log("relatorio", texto, texto)
+    visual = gerar_relatorio_visual(antes, depois, desligados, lixo)
     titulo("Relatório")
     say(texto)
     dizer_onde(log)
+    if visual:
+        say("Relatório visual offline: %s" % visual.get("html"))
+        say("Dados estruturados: %s" % visual.get("json"))
 
 
 def menu(adb, sim=False, sem_onda3=False):
@@ -3418,6 +3569,9 @@ def selftest():
     assert g.motivo("com.google.android.feedback") is None
     assert g.motivo("com.oemservice") is None
     assert "com.oemservice" in BAD_EXACT
+    assert "com.abc.nexus" in BAD_EXACT
+    assert "com.android.system.ntp" in BAD_EXACT
+    assert candidatos_onda2({"com.vendor.otaupdate", "com.abc.nexus"}) == ["com.abc.nexus"]
     assert caminho_oem_ok("/vendor/lib/liboemcrypto.so")
     assert caminho_oem_ok("/vendor/lib64/liboemcrypto.so.nexo-bak")
     assert caminho_oem_ok("/vendor/lib64/liboemcrypto.so.speedtv-bak")
@@ -3466,13 +3620,9 @@ def selftest():
     )
     assert pesados and pesados[0]["pacote"] == "com.android.calendar"
     assert ram_usavel_kb({"MemFree": 40000, "Cached": 700000, "Buffers": 10000}) == 750000
-    assert "com.rockchips.mediacenter" in candidatos_profundos(
-        ["com.rockchips.mediacenter", "com.droidlogic.mboxlauncher", "com.android.vending"],
-        Gate(),
-    )
-    assert "com.droidlogic.mboxlauncher" not in candidatos_profundos(
-        ["com.droidlogic.mboxlauncher"], Gate(),
-    )
+    assert candidatos_profundos(
+        ["com.rockchips.mediacenter", "com.droidlogic.mboxlauncher", "com.android.vending"], Gate(),
+    ) == []
     data = extrair_json("```json\n{\"diagnostico\": \"webview\", \"acoes\": []}\n```")
     assert data["diagnostico"] == "webview"
     nomes = parse_pm_names("package:com.android.vending\npackage:/system/app/X.apk=com.foo.bar\n")
@@ -3497,6 +3647,30 @@ def selftest():
     assert classificar_log("FATAL EXCEPTION MissingWebViewPackageException")[0] == "webview"
     assert validar_valor("dns.google")
     assert not validar_valor("a;rm")
+    global _DADOS
+    dados_anteriores = _DADOS
+    try:
+        with tempfile.TemporaryDirectory(prefix="speedtv-selftest-") as tmp:
+            _DADOS = Path(tmp)
+            (Path(tmp) / "metricas.jsonl").write_text(
+                json.dumps({"etiqueta": "antes", "mem_available_kb": 500000, "processos": 42, "desativados": 0, "data_livre_kb": 900000}) + "\n"
+                + json.dumps({"etiqueta": "fim", "mem_available_kb": 650000, "processos": 30, "desativados": 3, "data_livre_kb": 910000}) + "\n",
+                encoding="utf-8",
+            )
+            visual = gerar_relatorio_visual(
+                {"marca": "<Marca>", "modelo": "Teste", "plataforma": "amlogic", "abi": "arm64", "release": "11", "sdk": 30, "kernel": "4.9", "ram_real_mb": 2048, "ram_fonte": "zoneinfo", "ram_usavel_kb": 500000, "pacotes": 120, "pacotes_instalados": ["com.android.vending"]},
+                {"pacotes": 117, "ram_usavel_kb": 650000},
+                ["com.example.disabled"],
+                [],
+            )
+            html_report = Path(visual["html"]).read_text(encoding="utf-8")
+            json_report = json.loads(Path(visual["json"]).read_text(encoding="utf-8"))
+            assert "<!doctype html>" in html_report.lower()
+            assert "&lt;Marca&gt;" in html_report
+            assert "RAM disponível ao longo das ondas" in html_report
+            assert json_report["desativados_nesta_sessao"] == ["com.example.disabled"]
+    finally:
+        _DADOS = dados_anteriores
     say("selftest ok")
 
 
