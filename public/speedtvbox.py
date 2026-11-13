@@ -4027,8 +4027,7 @@ def menu(adb, sim=False, sem_onda3=False):
         say("  9  Modo sem Google — GMS / GSF / Play Store")
         say("  10 Diagnóstico de rede para IPTV")
         say("  11 Codecs e reprodução de áudio/vídeo")
-        say("  12 Investigar barra lateral/navegação")
-        say("  13 Serviços de atualização OTA do fabricante")
+        say("  12 Serviços de atualização OTA do fabricante")
         say("  0  Sair")
         try:
             escolha = input("\nDigite o número da tarefa: ").strip()
@@ -4070,8 +4069,6 @@ def menu(adb, sim=False, sem_onda3=False):
             elif escolha == "11":
                 auditar_video(adb)
             elif escolha == "12":
-                diagnosticar_barra(adb)
-            elif escolha == "13":
                 gerenciar_ota(adb)
             elif escolha == "0":
                 return
