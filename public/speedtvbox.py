@@ -3653,8 +3653,8 @@ def selftest():
         with tempfile.TemporaryDirectory(prefix="speedtv-selftest-") as tmp:
             _DADOS = Path(tmp)
             (Path(tmp) / "metricas.jsonl").write_text(
-                json.dumps({"etiqueta": "antes", "mem_available_kb": 500000, "processos": 42, "desativados": 0, "data_livre_kb": 900000}) + "\\n"
-                + json.dumps({"etiqueta": "fim", "mem_available_kb": 650000, "processos": 30, "desativados": 3, "data_livre_kb": 910000}) + "\\n",
+                json.dumps({"etiqueta": "antes", "mem_available_kb": 500000, "processos": 42, "desativados": 0, "data_livre_kb": 900000}) + "\n"
+                + json.dumps({"etiqueta": "fim", "mem_available_kb": 650000, "processos": 30, "desativados": 3, "data_livre_kb": 910000}) + "\n",
                 encoding="utf-8",
             )
             visual = gerar_relatorio_visual(
