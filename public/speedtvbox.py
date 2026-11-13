@@ -2022,9 +2022,13 @@ def reverter(adb, sim=False):
             adb.shell("settings put %s %s %s" % (ns, chave, antigo), 12)
         say("  ajuste %s restaurado" % chave)
     if journal.get("wm", {}).get("size_set"):
-        adb.shell("wm size reset", 12)
-        adb.shell("wm density reset", 12)
-        say("  resolução e densidade voltaram ao padrão da TV Box.")
+        anterior = journal.get("wm", {}).get("size_antes", "")
+        msize = re.search(r"Override size:\\s*(\\d+x\\d+)", anterior)
+        if msize:
+            adb.shell("wm size " + msize.group(1), 12)
+        else:
+            adb.shell("wm size reset", 12)
+        say("  resolução da interface restaurada ao estado anterior.")
     if tem_oem:
         say(restaurar_oem(adb, tem_root(adb), journal))
     scripts_pendentes = []
