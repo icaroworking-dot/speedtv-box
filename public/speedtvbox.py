@@ -3833,6 +3833,119 @@ def limpar_armazenamento(adb):
     say("Não apague manualmente pastas /data/app, /data/data ou /system.")
 
 
+def gerenciar_google(adb):
+    titulo("Modo sem Google — componentes opcionais")
+    conectar_ou_explicar(adb)
+    adb.refresh_user()
+    grupos = [
+        ("GMS / Google Play Services", ["com.google.android.gms"],
+         "Pode afetar login Google, notificações push, localização, Chromecast e apps dependentes."),
+        ("GSF / Google Services Framework", ["com.google.android.gsf", "com.google.android.gsf.login"],
+         "Pode afetar registro do aparelho e comunicação de serviços Google."),
+        ("Play Store", ["com.android.vending"],
+         "Desativa a loja, não necessariamente os apps instalados."),
+        ("Serviços auxiliares", ["com.google.android.partnersetup", "com.google.android.backuptransport", "com.google.android.configupdater"],
+         "Pode afetar configuração inicial, backup e atualizações Google."),
+    ]
+    for i,(nome,pkgs,aviso) in enumerate(grupos,1):
+        say("  %d  %s" % (i,nome))
+    say("  5  Reativar todos os componentes listados")
+    say("  0  Voltar")
+    escolha=input("Escolha: ").strip()
+    if escolha in ("","0"): return
+    journal=carregar_journal()
+    if escolha=="5":
+        lista=[p for _,ps,_ in grupos for p in ps if adb.existe(p)]
+        if lista and perguntar("Reativar os componentes encontrados? Não reinstala APK removido.",True):
+            reativar(adb,lista,journal.get("package_states"))
+        return
+    try: nome,pkgs,aviso=grupos[int(escolha)-1]
+    except (ValueError,IndexError):
+        say("Opção inválida."); return
+    say(aviso)
+    presentes=[p for p in pkgs if adb.existe(p)]
+    if not presentes:
+        say("Nenhum pacote instalado neste grupo."); return
+    ligados=[]; desligados=[]
+    for pkg in presentes:
+        code=adb.enabled_code(pkg)
+        say("  %s — %s" % (pkg,"ligado" if code in (0,1,None) else "desativado"))
+        (ligados if code in (0,1,None) else desligados).append(pkg)
+    if ligados and desligados:
+        acao=input("D = desativar ligados; A = ativar desligados: ").strip().lower()
+    else: acao="d" if ligados else "a"
+    if acao=="d":
+        if not perguntar("Desativar %s? Reversível; não desinstala nem apaga dados."%nome,False): return
+        for pkg in ligados:
+            code=adb.enabled_code(pkg)
+            journal.setdefault("package_states",{}).setdefault(pkg,{"enabled":code,"removido_para_usuario":False,"quando":agora_iso()})
+            out=adb.shell("pm disable-user --user %s %s"%(adb.user,pkg),20)
+            if "new state: disabled" in out.lower():
+                if pkg not in journal.setdefault("disabled",[]): journal["disabled"].append(pkg)
+                say("Desativado: "+pkg)
+            else: say("Não confirmado: %s — %s"%(pkg,out[:140]))
+        salvar_journal(journal)
+        escrever_rollback(adb.serial,adb.binary,journal.get("disabled",[]),journal.get("package_states"))
+    elif acao=="a":
+        if desligados and perguntar("Reativar %s?"%nome,True):
+            reativar(adb,desligados,journal.get("package_states")); salvar_journal(journal)
+    else: say("Cancelado.")
+    say("Não foi usado uninstall. Reverter também restaura estes estados.")
+
+
+def auditar_rede(adb):
+    titulo("Rede — diagnóstico para IPTV")
+    conectar_ou_explicar(adb)
+    props=adb.getprop_all()
+    iface=props.get("wifi.interface") or "wlan0"
+    say("Wi-Fi:")
+    say(adb.shell("dumpsys wifi 2>/dev/null | grep -i -E 'SSID|BSSID|RSSI|frequency|link speed|WifiInfo' | head -n 40",25) or "Sem dados Wi-Fi.")
+    say("Interfaces/rotas:")
+    say(adb.shell("ip -br addr 2>/dev/null; ip route 2>/dev/null",20) or "Sem saída.")
+    say("DNS: "+", ".join(x for x in (props.get("net.dns1"),props.get("net.dns2")) if x) or "não exposto")
+    say("Interface %s: estado=%s velocidade=%s"%(iface,
+        adb.shell("cat /sys/class/net/%s/operstate 2>/dev/null"%iface,10).strip() or "?",
+        adb.shell("cat /sys/class/net/%s/speed 2>/dev/null"%iface,10).strip() or "?"))
+    say("Ping IP (1.1.1.1):")
+    say(adb.shell("ping -c 4 -W 2 1.1.1.1 2>/dev/null",15) or "ping indisponível/bloqueado")
+    say("Ping com DNS (google.com):")
+    say(adb.shell("ping -c 2 -W 2 google.com 2>/dev/null",15) or "ping/DNS indisponível")
+    say("Para IPTV: Ethernet gigabit é preferível; Wi-Fi 5 GHz perto do roteador costuma superar 2,4 GHz congestionado.")
+    say("RSSI perto de -30 dBm é excelente; abaixo de -67 dBm pode ficar instável. Link speed não é throughput.")
+    say("Nenhum DNS, canal, MTU ou parâmetro de rádio foi alterado.")
+
+
+def auditar_video(adb):
+    titulo("Codecs e reprodução — IPTV")
+    conectar_ou_explicar(adb)
+    props=adb.getprop_all()
+    for key in ("ro.product.board","ro.board.platform","ro.hardware","ro.product.cpu.abi","ro.opengles.version"):
+        if props.get(key): say("%s = %s"%(key,props[key]))
+    say("Saída/densidade:"); say(adb.shell("wm size; wm density",15))
+    codecs=adb.shell("dumpsys media.codec 2>/dev/null | head -n 240",35)
+    if len(codecs.strip())<20: codecs=adb.shell("cmd media.codec list 2>/dev/null | head -n 240",25)
+    say("Codecs registrados pelo Android:"); say(codecs or "O firmware não expôs a lista.")
+    say("Media player:"); say(adb.shell("dumpsys media.player 2>/dev/null | head -n 80",20) or "sem saída")
+    say("Media extractor:"); say(adb.shell("dumpsys media.extractor 2>/dev/null | head -n 80",20) or "sem saída")
+    say("A lista de codecs não prova decodificação 4K em hardware. É preciso conferir codec, perfil, bit depth, HDR, fps e hardware decoding no player.")
+    say("O agente não instala APK de codec nem troca OMX/C2: decoders de hardware vêm do firmware/vendor.")
+    say("Para engasgos, teste o mesmo stream em outro player, reduza bitrate/fps e compare com Ethernet antes de forçar 1080p.")
+
+
+def diagnosticar_barra(adb):
+    titulo("Barra lateral/navegação — somente leitura")
+    conectar_ou_explicar(adb)
+    for pkg in ("com.spocky.projengmenu","com.fares.glass"):
+        if adb.existe(pkg): say("%s instalado; enabled=%s"%(pkg,adb.enabled_code(pkg)))
+    say("HOME: "+(home_package(adb) or "não identificado"))
+    for ns,key in (("global","policy_control"),("global","immersive_mode_confirmations"),
+                   ("secure","immersive_mode_confirmations"),("system","navigationbar_is_min")):
+        say("%s.%s = %s"%(ns,key,setting_get(adb,ns,key) or "(padrão/vazio)"))
+    say("qemu.hw.mainkeys = "+(adb.prop("qemu.hw.mainkeys") or "(não definido)"))
+    say(adb.shell("dumpsys window 2>/dev/null | grep -i -E 'NavigationBar|StatusBar|Projectivy|projeng|Glass|fares' | head -n 80",25))
+    say("Não alterei SystemUI. O launcher pode apenas deixar de esconder a barra do sistema; Projectivy também pode ter painel próprio. A correção depende de identificar qual janela está visível.")
+
+
 def menu(adb, sim=False, sem_onda3=False):
     while True:
         titulo("SpeedTV Box %s — Assistente" % VERSAO)
@@ -3847,6 +3960,10 @@ def menu(adb, sim=False, sem_onda3=False):
         say("  6  Investigar vírus e segurança")
         say("  7  Recuperar alterações / desfazer")
         say("  8  Mais ferramentas e relatórios")
+        say("  9  Modo sem Google — GMS / GSF / Play Store")
+        say("  10 Diagnóstico de rede para IPTV")
+        say("  11 Codecs e reprodução de áudio/vídeo")
+        say("  12 Investigar barra lateral/navegação")
         say("  0  Sair")
         try:
             escolha = input("\nDigite o número da tarefa: ").strip()
@@ -3881,6 +3998,14 @@ def menu(adb, sim=False, sem_onda3=False):
                 reverter(adb, sim=sim)
             elif escolha == "8":
                 submenu(adb, sim)
+            elif escolha == "9":
+                gerenciar_google(adb)
+            elif escolha == "10":
+                auditar_rede(adb)
+            elif escolha == "11":
+                auditar_video(adb)
+            elif escolha == "12":
+                diagnosticar_barra(adb)
             elif escolha == "0":
                 return
             else:
@@ -3941,7 +4066,10 @@ def submenu(adb, sim=False):
             say("Não reconheci essa opção.")
 
 def selftest():
-    assert VERSAO == "9"
+    assert VERSAO == "10"
+    assert SDK_ANDROID_VERSION[25] == "7.1"
+    assert avaliar_android(25, "10.1", (3, 10))["mentira"] is True
+    assert "Android 7.1" in linha_android({"release":"10.1","sdk":25,"kernel":"3.10","android":avaliar_android(25,"10.1",(3,10))})
     assert origem_https_permitida("https://api.github.com/repos/a/b", {"api.github.com"})
     assert not origem_https_permitida("http://api.github.com/repos/a/b", {"api.github.com"})
     assert not origem_https_permitida("https://api.github.com.evil.invalid/a", {"api.github.com"})
