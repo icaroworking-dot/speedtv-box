@@ -353,7 +353,7 @@ export function Console() {
           <h1 className="font-display text-5xl leading-none text-fg sm:text-6xl">SpeedTV Box</h1>
         </div>
         <p className="max-w-xs text-sm text-muted">
-          Versão 9. Assistente guiado, auditoria, limpeza por etapas, instalador de launchers e relatórios em Download/SpeedTV.
+          Gerador v10 · agente Python v9. Auditoria guiada, otimização por etapas, instaladores e relatórios.
         </p>
       </header>
 
@@ -433,7 +433,7 @@ export function Console() {
             Lembrar a chave neste navegador
           </label>
           <p className="mt-2 text-sm text-muted">
-            O .py baixado já sai com IP e chave gravados. Se não marcar a opção acima, a chave não fica salva no navegador, mas continua dentro do arquivo que você baixar.
+            O arquivo é montado no próprio navegador: IP e chave Gemini entram diretamente no Python, sem serem enviados ao servidor. Se não marcar “Lembrar”, a chave não fica salva no navegador — mas permanece dentro do arquivo baixado. Quem tiver esse arquivo poderá ler a chave.
           </p>
           <div className="mt-5 flex flex-col gap-2 sm:flex-row">
             <button
@@ -642,7 +642,7 @@ export function Console() {
           </pre>
         ) : null}
         <p className="mt-4 text-xs leading-relaxed text-faint">
-          A chave nunca é gravada no repositório. Ela entra no arquivo que você baixa; marque “Lembrar a chave” apenas se quiser mantê-la no armazenamento local deste navegador. Não publique o .py personalizado.
+          A chave nunca é gravada no repositório nem enviada ao servidor pelo gerador. Ela entra no arquivo Python no próprio navegador. Marque “Lembrar a chave” apenas se quiser mantê-la no armazenamento local. Não publique nem compartilhe o .py personalizado: ele contém sua chave Gemini.
         </p>
       </section>
         </>
