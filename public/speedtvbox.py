@@ -42,6 +42,7 @@ VERSAO = "11"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
+_SESSAO_DIR = None
 
 PKG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
 CHAVE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\.]{0,80}$")
@@ -449,19 +450,40 @@ def setup_stdio():
 _SESSAO = None
 
 
-def iniciar_sessao():
-    global _SESSAO
+def pasta_sessao():
+    """Diretório isolado da execução atual; journal e rollback continuam persistentes na raiz."""
+    return _SESSAO_DIR or garantir_dados()
+
+
+def iniciar_sessao(nome_cliente=None):
+    global _SESSAO, _SESSAO_DIR
     if _SESSAO:
         return _SESSAO
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    apelido = _nome_arquivo(nome_cliente) if nome_cliente else ""
+    sufixo = ("_" + apelido[:24]) if apelido else ""
+    nome_pasta = "Sessao_%s%s" % (stamp, sufixo)
     try:
-        pasta = pasta_visivel() or garantir_dados()
+        base = pasta_visivel() or garantir_dados()
+        destino = base / "Sessoes" / nome_pasta
+        destino.mkdir(parents=True, exist_ok=False)
     except Exception:
-        return None
-    _SESSAO = pasta / ("sessao_%s.txt" % datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        try:
+            destino = garantir_dados() / "Sessoes" / nome_pasta
+            destino.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return None
+    _SESSAO_DIR = destino
+    _SESSAO = destino / "00 - Registro da sessao.txt"
     try:
-        _SESSAO.write_text("SpeedTV Box — sessão completa\n", encoding="utf-8")
+        _SESSAO.write_text(
+            "SpeedTV Box — registro da sessão\n"
+            "Início: %s\nPasta: %s\n" % (agora_iso(), destino.name),
+            encoding="utf-8",
+        )
     except Exception:
         _SESSAO = None
+        _SESSAO_DIR = None
     return _SESSAO
 
 
@@ -982,8 +1004,8 @@ def anexar_log(nome, texto, resumo=""):
         "Este arquivo começa pelo resumo, para você ler ou colar numa IA. O bruto vem depois.\n\n"
         "RESUMO\n%s\n\nBRUTO\n%s\n"
     ) % (titulo_log, quando, (resumo or "(sem resumo)").strip(), bruto)
-    pasta = garantir_dados()
-    path = pasta / ("%s_%s.txt" % (stamp, titulo_log))
+    pasta = pasta_sessao()
+    path = pasta / ("%s - %s.txt" % (datetime.now().strftime("%H-%M-%S"), titulo_log))
     path.write_text(blob, encoding="utf-8")
     copia = publicar_relatorio(path)
     return copia or path
@@ -1009,8 +1031,8 @@ def dizer_onde(path):
 
 
 def anexar_metricas(item):
-    pasta = garantir_dados()
-    with (pasta / "metricas.jsonl").open("a", encoding="utf-8") as fh:
+    pasta = pasta_sessao()
+    with (pasta / "08 - Metricas.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
@@ -2801,7 +2823,7 @@ def conectar_ou_explicar(adb):
 
 def comparar():
     titulo("Antes e depois")
-    path = garantir_dados() / "metricas.jsonl"
+    path = pasta_sessao() / "08 - Metricas.jsonl"
     if not path.is_file():
         say("Ainda não há medidas. Rode a auditoria ou o debloat.")
         return
@@ -2888,14 +2910,27 @@ def pasta_visivel():
 
 
 def publicar_relatorio(path):
-    """Copia para Download/SpeedTV, a pasta que abre no app Arquivos."""
-    nome = Path(path).name
-    pasta = pasta_visivel()
-    if not pasta:
+    """Mantém a hierarquia Sessoes/nome-da-sessao ao publicar no Download."""
+    origem = Path(path)
+    base = pasta_visivel()
+    if not base:
         return None
     try:
-        destino = pasta / nome
-        shutil.copy2(path, destino)
+        if _SESSAO_DIR:
+            sessao = Path(_SESSAO_DIR)
+            try:
+                origem.resolve().relative_to(sessao.resolve())
+                if sessao.resolve().is_relative_to(base.resolve()):
+                    return origem
+                relativo = origem.resolve().relative_to(sessao.resolve())
+                destino = base / "Sessoes" / sessao.name / relativo
+            except ValueError:
+                destino = base / origem.name
+        else:
+            destino = base / origem.name
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        if origem.resolve() != destino.resolve():
+            shutil.copy2(origem, destino)
         return destino
     except Exception:
         return None
@@ -3236,9 +3271,9 @@ def ler_diagnosticos_operacionais(pasta):
 
 def gerar_relatorio_visual(antes, depois, desligados, lixo):
     """Gera um relatório HTML offline e JSON com inventário e métricas por etapa."""
-    pasta = garantir_dados()
+    pasta = pasta_sessao()
     metricas = []
-    arquivo_metricas = pasta / "metricas.jsonl"
+    arquivo_metricas = pasta / "08 - Metricas.jsonl"
     if arquivo_metricas.is_file():
         try:
             for linha in arquivo_metricas.read_text(encoding="utf-8").splitlines():
@@ -3272,7 +3307,7 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
         "metricas_por_etapa": metricas,
         "diagnosticos_operacionais": ler_diagnosticos_operacionais(pasta),
     }
-    json_path = pasta / "relatorio.json"
+    json_path = pasta / "07 - Dados completos.json"
     json_path.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def esc(valor):
@@ -3361,7 +3396,7 @@ main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid 
         .replace("__PACKAGES__", pacotes)
         .replace("__DIAGNOSTICS__", "".join("<article class='card'><strong>%s</strong><span>%s</span><small>%s</small></article>" % (esc(d.get("tipo")), esc(d.get("resumo")), esc(d.get("quando"))) for d in dados.get("diagnosticos_operacionais", [])) or "<p>Nenhum diagnóstico adicional registrado nesta sessão.</p>")
     )
-    html_path = pasta / "relatorio.html"
+    html_path = pasta / "06 - Relatorio geral.html"
     html_path.write_text(html_doc, encoding="utf-8")
     return {
         "html": publicar_relatorio(html_path) or html_path,
@@ -3458,7 +3493,7 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
     antes = auditar(adb, falar=False)
     lixo = achar_lixo(adb.installed_map())
     mostrar_leitura(antes, lixo)
-    (garantir_dados() / "antes.json").write_text(
+    (pasta_sessao() / "01 - Auditoria inicial.json").write_text(
         json.dumps(antes, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     journal = carregar_journal()
@@ -3972,9 +4007,9 @@ def gerenciar_ota(adb):
 
 
 def registrar_relatorio_operacional(tipo,resumo,dados):
-    pasta=garantir_dados(); registro={"quando":agora_iso(),"tipo":tipo,"resumo":resumo,"dados":dados}
+    pasta=pasta_sessao(); registro={"quando":agora_iso(),"tipo":tipo,"resumo":resumo,"dados":dados}
     with (pasta/"diagnosticos.jsonl").open("a",encoding="utf-8") as fh: fh.write(json.dumps(registro,ensure_ascii=False)+"\n")
-    base="%s_%s"%(datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),_nome_arquivo(tipo))
+    base="%s - %s"%(datetime.now().strftime("%H-%M-%S"),_nome_arquivo(tipo))
     bruto=json.dumps(dados,indent=2,ensure_ascii=False)
     txt=pasta/(base+".txt"); txt.write_text("SpeedTV Box — %s\nQuando: %s\n\nRESUMO\n%s\n\nDETALHES TÉCNICOS\n%s\n"%(tipo,registro["quando"],resumo,bruto),encoding="utf-8")
     h=pasta/(base+".html"); h.write_text("<!doctype html><html lang='pt-BR'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>SpeedTV Box — %s</title><style>body{font:16px system-ui;background:#07101f;color:#eef5ff;max-width:900px;margin:32px auto;padding:0 18px}article{background:#101d31;border:1px solid #263852;border-radius:14px;padding:18px;margin:14px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#c5d4e8;font-size:13px}</style><h1>SpeedTV Box — %s</h1><article><h2>Resumo</h2><p>%s</p></article><article><h2>Registro técnico</h2><pre>%s</pre></article></html>"%tuple(html.escape(x) for x in (tipo,tipo,resumo,bruto)),encoding="utf-8")
@@ -4341,11 +4376,12 @@ def main(argv=None):
     parser.add_argument("--sem-onda3", action="store_true")
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--dispositivo", default=None)
+    parser.add_argument("--cliente", default=None, help="apelido opcional para identificar a pasta da sessão")
     args = parser.parse_args(argv)
     if args.selftest or args.comando == "selftest":
         selftest()
         return 0
-    iniciar_sessao()
+    iniciar_sessao(args.cliente)
     binary = find_adb()
     if not binary:
         say("Não achei o adb.")
