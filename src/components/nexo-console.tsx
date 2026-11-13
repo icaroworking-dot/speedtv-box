@@ -54,12 +54,12 @@ const COMANDOS = [
   ["python speedtvbox.py reverter", "restaura alterações reversíveis feitas pelo agente"],
 ];
 
-const BLOCO_TERMUX = \`f=$(find "$HOME/storage/downloads" "$HOME/storage/shared/Download" "$HOME/storage/shared/Downloads" -iname 'speedtvbox.py*' 2>/dev/null | head -n 1)
+const BLOCO_TERMUX = `f=$(find "$HOME/storage/downloads" "$HOME/storage/shared/Download" "$HOME/storage/shared/Downloads" -iname 'speedtvbox.py*' 2>/dev/null | head -n 1)
 if [ -z "$f" ]; then echo "Não achei speedtvbox.py na pasta Download. Baixe o arquivo primeiro."; exit 1; fi
 echo "Agente encontrado: $f"
 cp "$f" "$HOME/speedtvbox.py" || exit 1
 cd "$HOME" || exit 1
-python speedtvbox.py\`;
+python speedtvbox.py`;
 
 const PASSOS = [
   {
