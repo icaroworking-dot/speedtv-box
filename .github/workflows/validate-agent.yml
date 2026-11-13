@@ -25,7 +25,7 @@ jobs:
       - name: Run built-in tests
         run: python public/speedtvbox.py selftest
 
-  # Keep the browser app checked separately from the device-side Python agent.
+  # Re-run both suites whenever the agent, UI, or lockfile changes.
   web-app:
     runs-on: ubuntu-latest
     steps:
