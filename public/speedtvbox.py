@@ -32,12 +32,13 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "8"
+VERSAO = "9"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -217,6 +218,15 @@ WAVE2 = [
     "com.facebook.appmanager",
     "com.facebook.services",
     "com.facebook.orca",
+    "com.tv.clean",
+    "com.yxt.factorytest",
+    "com.android.app.cus.aging",
+    "com.android.amediatech.fota",
+    "com.abupdate.fota_demo_iot",
+    "com.google.android.youtube.tv.recommendations",
+    "com.google.android.partnersetup",
+    "com.google.android.backuptransport",
+    "com.google.android.syncadapters.contacts",
     "com.android.calculator2",
     "com.google.android.calculator",
     "com.android.camera2",
@@ -296,6 +306,8 @@ LIXO_FABRICA = (
     ("com.google.android.videos", "Filmes Google"),
     ("com.ionitech.airscreen", "AirScreen"),
     ("com.softwinner.fireplayer", "Player da placa"),
+    ("tv.pluto.android", "Pluto TV"),
+    ("org.videolan.vlc", "VLC"),
 )
 
 BAD_EXACT = {
@@ -3437,26 +3449,386 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
         say("Dados estruturados: %s" % visual.get("json"))
 
 
+
+
+# Instalações oficiais. O agente baixa apenas APKs de hosts/repositórios definidos.
+def origem_https_permitida(url, hosts):
+    parsed = urlparse(url)
+    return parsed.scheme == "https" and parsed.hostname in hosts
+
+
+def _ler_json_https(url, hosts):
+    parsed = urlparse(url)
+    if not origem_https_permitida(url, hosts):
+        raise ValueError("Origem de atualização não autorizada: %s" % (parsed.hostname or "?"))
+    req = urllib.request.Request(url, headers={"User-Agent": "SpeedTVBox/9"})
+    with urllib.request.urlopen(req, timeout=35) as response:
+        final = urlparse(response.geturl())
+        if final.scheme != "https" or final.hostname not in hosts:
+            raise ValueError("O servidor redirecionou para uma origem não autorizada.")
+        bruto = response.read(2 * 1024 * 1024 + 1)
+    if len(bruto) > 2 * 1024 * 1024:
+        raise ValueError("Resposta de atualização grande demais.")
+    return json.loads(bruto.decode("utf-8"))
+
+
+def _asset_apk(api_url, hosts):
+    dados = _ler_json_https(api_url, hosts)
+    assets = dados.get("assets") or []
+    for asset in assets:
+        nome = str(asset.get("name") or "")
+        url = asset.get("browser_download_url") or asset.get("url")
+        if nome.lower().endswith(".apk") and url:
+            return nome, url
+    raise RuntimeError("O lançamento oficial não publicou um APK reconhecível.")
+
+
+def _baixar_apk(url, destino, hosts):
+    parsed = urlparse(url)
+    if not origem_https_permitida(url, hosts):
+        raise ValueError("Download bloqueado: origem não autorizada.")
+    req = urllib.request.Request(url, headers={"User-Agent": "SpeedTVBox/9"})
+    with urllib.request.urlopen(req, timeout=90) as response:
+        final = urlparse(response.geturl())
+        if final.scheme != "https" or final.hostname not in hosts:
+            raise ValueError("O APK foi redirecionado para um host não autorizado.")
+        limite = 60 * 1024 * 1024
+        partes = []
+        total = 0
+        while True:
+            bloco = response.read(1024 * 1024)
+            if not bloco:
+                break
+            total += len(bloco)
+            if total > limite:
+                raise ValueError("APK maior que o limite de 60 MB.")
+            partes.append(bloco)
+    bruto = b"".join(partes)
+    if len(bruto) < 40 * 1024 or not bruto.startswith(b"PK\x03\x04"):
+        raise ValueError("O arquivo recebido não parece ser um APK válido.")
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_bytes(bruto)
+    return len(bruto)
+
+
+def _instalar_apk_oficial(adb, nome, api_url, hosts, pacote, arquivo):
+    conectar_ou_explicar(adb)
+    titulo("Instalando " + nome)
+    say("Buscando o lançamento oficial. O agente não usa sites de APK de terceiros.")
+    try:
+        nome_asset, url = _asset_apk(api_url, hosts)
+        destino = garantir_dados() / "apks" / arquivo
+        tamanho = _baixar_apk(url, destino, hosts)
+    except Exception as exc:
+        say("Não consegui obter o APK oficial: %s" % exc)
+        return False
+    say("Download concluído: %s (%s MB)." % (nome_asset, "%.2f" % (tamanho / 1048576.0)))
+    say("Instalando no usuário Android %s…" % adb.user)
+    codigo, saida = adb._exec(["-s", adb.serial, "install", "-r", str(destino)], 180)
+    if codigo != 0 or "success" not in saida.lower():
+        say("A instalação não foi confirmada pelo Android:")
+        say(saida[:700] or "sem resposta")
+        say("O APK ficou guardado em: %s" % destino)
+        return False
+    if not adb.existe(pacote):
+        say("O instalador terminou, mas o pacote esperado não apareceu. Não alterei a tela inicial.")
+        return False
+    say("%s instalado e confirmado (%s)." % (nome, pacote))
+    say("APK guardado em: %s" % destino)
+    return True
+
+
+def _definir_launcher(adb, pacote):
+    consulta = adb.shell(
+        "cmd package resolve-activity --brief -a android.intent.action.MAIN "
+        "-c android.intent.category.HOME -p " + pacote, 20
+    )
+    componente = ""
+    for linha in reversed(consulta.splitlines()):
+        m = re.search(r"([A-Za-z0-9_.]+/[A-Za-z0-9_.$]+)", linha.strip())
+        if m and m.group(1).split("/", 1)[0] == pacote:
+            componente = m.group(1)
+            break
+    if not componente:
+        return False, "O Android não anunciou uma atividade HOME para este launcher."
+    tentativas = [
+        "cmd package set-home-activity --user %s %s" % (adb.user, componente),
+        "pm set-home-activity --user %s %s" % (adb.user, componente),
+    ]
+    for comando in tentativas:
+        try:
+            adb.shell(comando, 20)
+        except Exception:
+            pass
+        if home_package(adb) == pacote:
+            return True, componente
+    say("O Android não aceitou a troca silenciosa. Vou abrir a escolha de tela inicial.")
+    try:
+        adb.shell(
+            "am start -a android.intent.action.MAIN -c android.intent.category.HOME", 20
+        )
+    except Exception:
+        pass
+    say("Na TV, selecione o launcher recém-instalado e marque 'Sempre', se aparecer.")
+    try:
+        input("Depois de escolher a nova tela inicial na TV, pressione Enter aqui…")
+    except EOFError:
+        pass
+    return home_package(adb) == pacote, componente
+
+
+def _desativar_launcher_antigo(adb, antigo, novo):
+    if not antigo or antigo == novo:
+        say("Não há launcher antigo diferente para desativar.")
+        return
+    if not perguntar(
+        "A nova tela inicial foi confirmada. Desativar o launcher antigo (%s)? "
+        "Ele ficará guardado e poderá ser restaurado." % antigo,
+        True,
+    ):
+        say("Mantive o launcher antigo habilitado como alternativa.")
+        return
+    journal = carregar_journal()
+    code = adb.enabled_code(antigo)
+    if code not in (0, 1):
+        say("Não consegui confirmar o estado anterior de %s. Não vou mexer nele." % antigo)
+        return
+    journal.setdefault("package_states", {}).setdefault(antigo, {
+        "enabled": code, "removido_para_usuario": False, "quando": agora_iso(),
+    })
+    saida = adb.shell("pm disable-user --user %s %s" % (adb.user, antigo), 20)
+    if "new state: disabled" not in saida.lower():
+        say("O Android não confirmou a desativação: %s" % saida[:250])
+        return
+    if antigo not in journal.setdefault("disabled", []):
+        journal["disabled"].append(antigo)
+    journal.setdefault("launcher", {})["antigo_desativado"] = antigo
+    journal["launcher"]["novo"] = novo
+    salvar_journal(journal)
+    escrever_rollback(adb.serial, adb.binary, journal["disabled"], journal.get("package_states"))
+    if home_package(adb) != novo:
+        say("A verificação falhou. Reativando o launcher antigo automaticamente.")
+        reativar(adb, [antigo], journal.get("package_states"))
+        journal["disabled"] = [p for p in journal["disabled"] if p != antigo]
+        journal.get("package_states", {}).pop(antigo, None)
+        journal["launcher"].pop("antigo_desativado", None)
+        salvar_journal(journal)
+        return
+    say("Launcher antigo desativado. A nova tela inicial continua sendo a HOME.")
+    say("Para desfazer: menu principal → Recuperar alterações.")
+
+
+def instalar_launcher(adb, escolha):
+    catalogo = {
+        "glass": {
+            "nome": "Glass Launcher",
+            "api": "https://api.github.com/repos/tlfares/GlassLauncher/releases/latest",
+            "hosts": {"api.github.com", "github.com", "release-assets.githubusercontent.com"},
+            "pacote": "com.fares.glass",
+            "arquivo": "FlareGlassLauncher.apk",
+        },
+        "projectivy": {
+            "nome": "Projectivy Launcher",
+            "api": "https://api.github.com/repos/spocky/miproja1/releases/latest",
+            "hosts": {"api.github.com", "github.com", "release-assets.githubusercontent.com"},
+            "pacote": "com.spocky.projengmenu",
+            "arquivo": "ProjectivyLauncher.apk",
+        },
+    }
+    item = catalogo.get(escolha)
+    if not item:
+        say("Escolha de launcher desconhecida.")
+        return
+    antigo = home_package(adb)
+    if antigo == item["pacote"]:
+        say("%s já é a tela inicial padrão." % item["nome"])
+        return
+    if not _instalar_apk_oficial(
+        adb, item["nome"], item["api"], item["hosts"], item["pacote"], item["arquivo"]
+    ):
+        return
+    try:
+        adb.shell("monkey -p %s 1" % item["pacote"], 20)
+    except Exception:
+        pass
+    ok, detalhe = _definir_launcher(adb, item["pacote"])
+    if not ok:
+        say("O aplicativo foi instalado, mas o Android não confirmou a troca automática.")
+        say("Na TV Box, abra o novo launcher e escolha 'Sempre' quando o Android perguntar.")
+        say("Também pode selecionar em Configurações → Apps → Apps padrão → App de início.")
+        say("Não desativei nem removi o launcher antigo.")
+        return
+    say("Android agora aponta HOME para %s." % item["nome"])
+    say("Teste o botão HOME do controle remoto.")
+    if perguntar("A nova tela inicial apareceu corretamente ao apertar HOME?", True):
+        _desativar_launcher_antigo(adb, antigo, item["pacote"])
+    else:
+        say("O teste do botão HOME não passou. Vou tentar restaurar a tela inicial anterior.")
+        if antigo:
+            voltou, _detalhe = _definir_launcher(adb, antigo)
+            if voltou:
+                say("Launcher anterior restaurado como HOME. O novo aplicativo continua instalado.")
+            else:
+                say("Não consegui restaurar automaticamente. O launcher antigo continua habilitado; selecione-o em Apps padrão → App de início.")
+        else:
+            say("Não havia um launcher anterior identificado. O novo continua instalado, mas não desativei nenhum pacote.")
+
+
+def abrir_ou_instalar_downloader(adb):
+    conectar_ou_explicar(adb)
+    pacote = "com.esaba.downloader"
+    loja = "com.android.vending"
+    if adb.existe(pacote) and adb.enabled_code(pacote) in (0, 1, None):
+        say("Downloader já está instalado. Abrindo…")
+        say(adb.shell("monkey -p %s 1" % pacote, 20))
+        return
+    if not adb.existe(loja):
+        say("Esta TV Box não tem a Play Store instalada.")
+        say("O Downloader só tem distribuição oficial confirmada pela loja. Não vou instalar APK de espelho.")
+        say("Se quiser, instale pela Play Store em outro método confiável e volte aqui.")
+        return
+    estado_loja = adb.enabled_code(loja)
+    temporaria = estado_loja in (2, 3, 4)
+    if temporaria:
+        say("A Play Store está desativada neste aparelho.")
+        if not perguntar("Ativar a loja temporariamente para instalar o Downloader?", True):
+            say("Não alterei a Play Store.")
+            return
+        saida = adb.shell("pm enable --user %s %s" % (adb.user, loja), 20)
+        if "new state: enabled" not in saida.lower() and adb.enabled_code(loja) not in (0, 1):
+            say("Não consegui reativar a Play Store: %s" % saida[:250])
+            return
+    say("Abrindo a página oficial do Downloader by AFTVnews no Google Play.")
+    saida = adb.shell(
+        "am start -a android.intent.action.VIEW "
+        "-d 'market://details?id=com.esaba.downloader'", 25
+    )
+    if "error" in saida.lower() or "unable" in saida.lower() or "not found" in saida.lower():
+        saida = adb.shell(
+            "am start -a android.intent.action.VIEW "
+            "-d 'https://play.google.com/store/apps/details?id=com.esaba.downloader'", 25
+        )
+    say(saida or "Página da loja solicitada na TV Box.")
+    say("Na TV, toque em Instalar. Depois volte ao Termux e pressione Enter.")
+    try:
+        input("Pressione Enter quando terminar na TV…")
+    except EOFError:
+        pass
+    instalado = adb.existe(pacote)
+    say("Downloader instalado e confirmado." if instalado else "Ainda não encontrei o Downloader instalado.")
+    if temporaria:
+        restaurar = {
+            2: "pm disable --user %s %s" % (adb.user, loja),
+            3: "pm disable-user --user %s %s" % (adb.user, loja),
+            4: "pm disable-until-used --user %s %s" % (adb.user, loja),
+        }.get(estado_loja)
+        if restaurar:
+            adb.shell(restaurar, 20)
+            say("Play Store voltou ao estado anterior (desativada).")
+
+
+
+def menu_instalacoes(adb):
+    while True:
+        titulo("Instalar aplicativos")
+        say("Escolha o que quer colocar na TV Box:")
+        say("  1  Downloader — navegador e instalador de APKs")
+        say("  2  Glass Launcher — tela inicial leve")
+        say("  3  Projectivy Launcher — tela inicial personalizável")
+        say("  0  Voltar")
+        try:
+            escolha = input("\nO que vamos instalar? ").strip()
+        except EOFError:
+            return
+        if escolha == "1":
+            abrir_ou_instalar_downloader(adb)
+        elif escolha == "2":
+            instalar_launcher(adb, "glass")
+        elif escolha == "3":
+            instalar_launcher(adb, "projectivy")
+        elif escolha in ("0", ""):
+            return
+        else:
+            say("Não reconheci essa opção. Escolha 1, 2, 3 ou 0.")
+
+
+def liberar_ram(adb):
+    titulo("Liberar RAM")
+    conectar_ou_explicar(adb)
+    instalados = set(adb.installed_map())
+    sistema = adb.system_names()
+    gate = Gate(coletar_dinamicos(adb))
+    bruto = adb.shell("dumpsys meminfo", 35)
+    pesados = processos_pesados(bruto, instalados, gate)
+    candidatos = [
+        p for p in pesados
+        if validar_pacote(p.get("pacote"))
+        and p["pacote"] not in sistema
+        and not p.get("protegido")
+        and (p.get("kb") or 0) >= 25000
+    ]
+    if not candidatos:
+        say("Não encontrei aplicativos de usuário em segundo plano com consumo relevante.")
+        say("O Android já administra a RAM livre; não vou encerrar serviços do sistema à força.")
+        return
+    say("Estes aplicativos instalados pelo usuário estão entre os que mais consomem RAM:")
+    escolhidos = []
+    for p in candidatos[:12]:
+        say("  %s — %s" % (p.get("pacote"), kb_mb(p.get("kb"))))
+        if perguntar("Fechar este aplicativo agora? Ele poderá abrir normalmente depois.", False):
+            escolhidos.append(p["pacote"])
+    if not escolhidos:
+        say("Nenhum aplicativo foi fechado.")
+        return
+    for pkg in escolhidos:
+        out = adb.shell("am force-stop --user %s %s" % (adb.user, pkg), 20)
+        say("  fechado %s — %s" % (pkg, out or "comando enviado"))
+    depois = coletar_metricas(adb, "depois-fechar-apps")
+    say("Medição depois: " + linha_metrica(depois))
+    say("Isso libera memória temporariamente; o Android pode reabrir apps quando necessário.")
+
+
+def limpar_armazenamento(adb):
+    titulo("Liberar armazenamento")
+    conectar_ou_explicar(adb)
+    antes = parse_df_data(adb.shell("df -k /data 2>/dev/null || df /data", 20))
+    say("Antes: %s livres em /data." % kb_mb(antes.get("livre_kb")))
+    say("Vou pedir ao Android para remover somente caches que ele considera descartáveis.")
+    say("Fotos, vídeos, contas, configurações e dados dos aplicativos não serão apagados.")
+    if not perguntar("Executar a limpeza segura de cache?", True):
+        say("Cancelado.")
+        return
+    saida = adb.shell("pm trim-caches 999999999K", 90)
+    say(saida or "Solicitação de limpeza enviada ao Package Manager.")
+    depois = parse_df_data(adb.shell("df -k /data 2>/dev/null || df /data", 20))
+    a, b = antes.get("livre_kb"), depois.get("livre_kb")
+    if a is not None and b is not None:
+        delta = b - a
+        say("Depois: %s livres. Variação: %s." % (
+            kb_mb(b), ("+" if delta >= 0 else "") + kb_mb(delta)
+        ))
+    else:
+        say("Depois: %s livres." % kb_mb(b))
+    say("Não apague manualmente pastas /data/app, /data/data ou /system.")
+
+
 def menu(adb, sim=False, sem_onda3=False):
     while True:
-        titulo("SpeedTV Box %s" % VERSAO)
-        say("TV Box: %s" % adb.serial)
-        visivel = pasta_visivel()
-        if visivel:
-            say("Relatórios: Download/SpeedTV")
-        else:
-            say("Relatórios ainda dentro do Termux. Rode: termux-setup-storage")
-        if _SESSAO:
-            say("Esta sessão, inteira: %s" % _SESSAO.name)
+        titulo("SpeedTV Box %s — Assistente" % VERSAO)
+        say("TV Box configurada: %s" % adb.serial)
         say("")
-        say("  1  Começar agora")
-        say("  2  Só olhar")
-        say("  3  Limpar de novo")
-        say("  4  Consertar a Play Store")
-        say("  5  Mais opções")
+        say("O que você quer fazer?")
+        say("  1  Começar — auditoria completa e otimização guiada")
+        say("  2  Diagnosticar — só examinar, sem alterar nada")
+        say("  3  Liberar espaço e memória")
+        say("  4  Instalar aplicativos ou trocar a tela inicial")
+        say("  5  Corrigir a Play Store")
+        say("  6  Investigar vírus e segurança")
+        say("  7  Recuperar alterações / desfazer")
+        say("  8  Mais ferramentas e relatórios")
         say("  0  Sair")
         try:
-            escolha = input("\nOpção: ").strip()
+            escolha = input("\nDigite o número da tarefa: ").strip()
         except EOFError:
             return
         try:
@@ -3466,95 +3838,96 @@ def menu(adb, sim=False, sem_onda3=False):
                 conectar_ou_explicar(adb)
                 diagnostico(adb)
             elif escolha == "3":
-                executar_ondas(adb, sim=sim, sem_onda3=sem_onda3)
+                titulo("Memória e armazenamento")
+                say("  1  Fechar apps de usuário que estão pesando na RAM")
+                say("  2  Limpar caches descartáveis para liberar armazenamento")
+                say("  3  Ver RAM e armazenamento sem alterar nada")
+                say("  0  Voltar")
+                sub = input("\nEscolha: ").strip()
+                if sub == "1":
+                    liberar_ram(adb)
+                elif sub == "2":
+                    limpar_armazenamento(adb)
+                elif sub == "3":
+                    status_ram(adb)
             elif escolha == "4":
-                playstore(adb, sim=sim)
+                menu_instalacoes(adb)
             elif escolha == "5":
-                outras(adb, sim, sem_onda3)
+                playstore(adb, sim=sim)
+            elif escolha == "6":
+                seguranca(adb, sim=sim)
+            elif escolha == "7":
+                reverter(adb, sim=sim)
+            elif escolha == "8":
+                submenu(adb, sim)
             elif escolha == "0":
                 return
             else:
-                say("Não conheço essa opção. Na primeira vez, é a 1.")
+                say("Não reconheci essa opção. Tente novamente.")
         except DeviceOffline as exc:
             say("A TV Box saiu do ADB: %s" % exc)
         except SystemExit:
             raise
         except KeyboardInterrupt:
-            say("\nInterrompido.")
+            say("\nInterrompido. Nenhuma etapa nova será iniciada.")
             return
         except Exception as exc:
-            say("Erro: %s" % exc)
-
-
-def outras(adb, sim=False, sem_onda3=False):
-    titulo("Mais opções")
-    say("  1  Vírus e backdoor")
-    say("  2  Widevine")
-    say("  3  Deixar mais rápida")
-    say("  4  Desfazer o que o SpeedTV Box mudou")
-    say("  5  Perguntar ao Gemini")
-    say("  6  Ferramentas")
-    say("  0  Voltar")
-    try:
-        escolha = input("\nOpção: ").strip()
-    except EOFError:
-        return
-    if escolha == "1":
-        seguranca(adb, sim=sim)
-    elif escolha == "2":
-        widevine(adb, sim=sim)
-    elif escolha == "3":
-        afinar(adb, sim=sim)
-    elif escolha == "4":
-        reverter(adb, sim=sim)
-    elif escolha == "5":
+            say("Ocorreu um erro nesta tarefa: %s" % exc)
         try:
-            q = input("Pergunta: ").strip()
+            input("\nPressione Enter para voltar ao menu principal…")
         except EOFError:
             return
-        if q:
-            perguntar_gemini(adb, q)
-    elif escolha == "6":
-        submenu(adb, sim)
-    elif escolha in ("0", ""):
-        return
-    else:
-        say("Não conheço essa opção.")
 
 
 def submenu(adb, sim=False):
-    titulo("Ferramentas")
-    say("  1  Comparar antes e depois")
-    say("  2  Boot, com parecer e o que fazer")
-    say("  3  RAM agora")
-    say("  4  Abrir um aplicativo e guardar o log")
-    say("  5  Reiniciar a TV Box")
-    say("  0  Voltar")
-    try:
-        escolha = input("\nOpção: ").strip()
-    except EOFError:
-        return
-    if escolha == "1":
-        comparar()
-    elif escolha == "2":
-        analisar_boot(adb)
-    elif escolha == "3":
-        status_ram(adb)
-    elif escolha == "4":
-        nome = input("Pacote (ex.: com.android.vending): ").strip()
-        abrir_cmd(adb, nome)
-    elif escolha == "5":
-        conectar_ou_explicar(adb)
-        if perguntar("Reiniciar agora?", False, None):
-            ok = reiniciar_esperar(adb)
-            say("Voltou." if ok else "Não voltou no prazo. Espere e tente o diagnóstico.")
-    elif escolha == "0" or escolha == "":
-        return
-    else:
-        say("Não conheço essa opção.")
-
+    while True:
+        titulo("Ferramentas")
+        say("  1  Comparar antes e depois")
+        say("  2  Analisar inicialização (boot)")
+        say("  3  Ver RAM e aplicativos pesados")
+        say("  4  Limpar cache para liberar armazenamento")
+        say("  5  Perguntar ao Gemini sobre esta TV Box")
+        say("  6  Reiniciar a TV Box")
+        say("  0  Voltar")
+        try:
+            escolha = input("\nQual ferramenta? ").strip()
+        except EOFError:
+            return
+        if escolha == "1":
+            comparar()
+        elif escolha == "2":
+            analisar_boot(adb)
+        elif escolha == "3":
+            status_ram(adb)
+        elif escolha == "4":
+            limpar_armazenamento(adb)
+        elif escolha == "5":
+            try:
+                q = input("O que você quer entender ou corrigir? ").strip()
+            except EOFError:
+                return
+            if q:
+                conectar_ou_explicar(adb)
+                perguntar_gemini(adb, q)
+        elif escolha == "6":
+            conectar_ou_explicar(adb)
+            if perguntar("Reiniciar agora?", False):
+                ok = reiniciar_esperar(adb)
+                say("A TV Box voltou." if ok else "Ainda não voltou. Espere e tente o diagnóstico.")
+        elif escolha in ("0", ""):
+            return
+        else:
+            say("Não reconheci essa opção.")
 
 def selftest():
+    assert VERSAO == "9"
+    assert origem_https_permitida("https://api.github.com/repos/a/b", {"api.github.com"})
+    assert not origem_https_permitida("http://api.github.com/repos/a/b", {"api.github.com"})
+    assert not origem_https_permitida("https://api.github.com.evil.invalid/a", {"api.github.com"})
+    assert "com.tv.clean" in WAVE2
+    assert "com.yxt.factorytest" in WAVE2
+    assert ("tv.pluto.android", "Pluto TV") in LIXO_FABRICA
+    assert ("org.videolan.vlc", "VLC") in LIXO_FABRICA
     assert validar_pacote("com.android.vending")
     assert not validar_pacote("com.foo;rm")
     assert not validar_pacote("rm -rf")

@@ -24,7 +24,7 @@ cd "$HOME"
 python speedtvbox.py
 ```
 
-Na primeira execução, escolha **1 — Começar agora**. Não é necessário resetar a TV Box para fazer a auditoria. O agente lê primeiro e pergunta antes das ações de limpeza. Faça backup dos dados importantes.
+Na primeira execução, escolha **1 — Começar**. O assistente conduz a auditoria, identifica o aparelho, verifica riscos, apresenta os grupos de limpeza e pergunta antes das ações. Não é necessário resetar a TV Box para começar. Faça backup dos dados importantes.
 
 ## O que o agente faz
 
@@ -34,13 +34,17 @@ Na primeira execução, escolha **1 — Começar agora**. Não é necessário re
 - Detecta indicadores conhecidos de Adups/XCPE e outros pacotes suspeitos. Isso não é garantia de que o firmware esteja limpo.
 - Registra o estado anterior dos pacotes e oferece reversão; gera script de recuperação.
 - Gera TXT, JSON e um relatório HTML offline com gráficos e métricas por etapa.
+- Menu guiado por finalidade: começar/otimizar, diagnóstico sem alterações, memória e armazenamento, instaladores, segurança, recuperação e ferramentas.
+- Instala Glass Launcher (`com.fares.glass`) e Projectivy Launcher a partir dos repositórios oficiais dos desenvolvedores; tenta definir HOME, pede teste do botão do controle e só oferece desativar o launcher anterior depois da confirmação. A desativação é reversível.
+- Abre a página oficial do Google Play para instalar Downloader by AFTVnews; se a Play Store estiver desativada, pode reativá-la temporariamente com autorização e restaurar o estado anterior depois. A instalação final é confirmada pelo usuário na loja.
+- Inclui limpeza de cache pelo Package Manager e fechamento opcional de apps de usuário pesados, sem forçar parada de componentes do sistema.
 - Preserva a integração Gemini: a página injeta a chave e o IP no arquivo Python baixado; o agente usa o Gemini como apoio, sem executar comandos arbitrários retornados pelo modelo.
 
 ## Segurança e compatibilidade
 
 - O debloat usa comandos de Package Manager limitados ao usuário Android atual; não apaga arquivos da partição `/system`.
-- A seleção de pacotes desconhecidos é conservadora. Não confirme pacotes de sistema que você não reconheça.
-- DNS privado, Bluetooth, parâmetros de Wi-Fi e resolução de vídeo não são alterados automaticamente.
+- A limpeza foi ampliada com perfis de pacotes exatos conhecidos (incluindo utilitários de fábrica observados em TV Boxes Amlogic/Aquário, Pluto TV e VLC quando presentes). Apps de usuário não entram em ondas automáticas; pacotes desconhecidos não são desativados às cegas. A onda mais profunda continua opcional e exige confirmação.
+- DNS privado, Bluetooth, parâmetros de Wi-Fi e resolução de vídeo não são alterados automaticamente. A limpeza de armazenamento usa `pm trim-caches`; não apaga fotos, vídeos, dados de apps ou arquivos de sistema.
 - A resolução pode ser avaliada e alterada separadamente quando o usuário decidir.
 - A contagem de processos é aproximada. MemAvailable (ou livre + cache em kernels antigos) é mais útil que MemFree isolado.
 - Um reset de fábrica não remove malware embutido na firmware.
