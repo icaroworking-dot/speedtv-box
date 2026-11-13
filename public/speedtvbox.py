@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -3646,6 +3647,30 @@ def selftest():
     assert classificar_log("FATAL EXCEPTION MissingWebViewPackageException")[0] == "webview"
     assert validar_valor("dns.google")
     assert not validar_valor("a;rm")
+    global _DADOS
+    dados_anteriores = _DADOS
+    try:
+        with tempfile.TemporaryDirectory(prefix="speedtv-selftest-") as tmp:
+            _DADOS = Path(tmp)
+            (Path(tmp) / "metricas.jsonl").write_text(
+                json.dumps({"etiqueta": "antes", "mem_available_kb": 500000, "processos": 42, "desativados": 0, "data_livre_kb": 900000}) + "\\n"
+                + json.dumps({"etiqueta": "fim", "mem_available_kb": 650000, "processos": 30, "desativados": 3, "data_livre_kb": 910000}) + "\\n",
+                encoding="utf-8",
+            )
+            visual = gerar_relatorio_visual(
+                {"marca": "<Marca>", "modelo": "Teste", "plataforma": "amlogic", "abi": "arm64", "release": "11", "sdk": 30, "kernel": "4.9", "ram_real_mb": 2048, "ram_fonte": "zoneinfo", "ram_usavel_kb": 500000, "pacotes": 120, "pacotes_instalados": ["com.android.vending"]},
+                {"pacotes": 117, "ram_usavel_kb": 650000},
+                ["com.example.disabled"],
+                [],
+            )
+            html_report = Path(visual["html"]).read_text(encoding="utf-8")
+            json_report = json.loads(Path(visual["json"]).read_text(encoding="utf-8"))
+            assert "<!doctype html>" in html_report.lower()
+            assert "&lt;Marca&gt;" in html_report
+            assert "RAM disponível ao longo das ondas" in html_report
+            assert json_report["desativados_nesta_sessao"] == ["com.example.disabled"]
+    finally:
+        _DADOS = dados_anteriores
     say("selftest ok")
 
 
