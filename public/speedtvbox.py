@@ -1697,6 +1697,8 @@ def desativar(adb, gate, journal, pacotes, onda):
                 salvar_journal(journal)
                 say("  removido para o usuário  %s (volta com Desfazer)" % pkg)
         else:
+            journal.get("package_states", {}).pop(pkg, None)
+            salvar_journal(journal)
             pulou.append((pkg, (out or "sem confirmação").strip().splitlines()[-1][:160]))
     journal.setdefault("ondas", []).append({
         "onda": onda, "quando": agora_iso(), "desativados": mudou,
@@ -1721,7 +1723,9 @@ def reativar(adb, pacotes, estados=None):
         estado = estados.get(pkg) or {}
         adb.shell("pm install-existing --user %s %s" % (adb.user, pkg), 18)
         if estado.get("enabled") == 0:
-            adb.shell("pm default-state --user %s %s" % (adb.user, pkg), 18)
+            resultado = adb.shell("pm default-state --user %s %s" % (adb.user, pkg), 18)
+            if "unknown command" in resultado.lower() or "unknown" in resultado.lower():
+                adb.shell("pm enable --user %s %s" % (adb.user, pkg), 18)
         else:
             adb.shell("pm enable --user %s %s" % (adb.user, pkg), 18)
         adb.shell("pm unhide --user %s %s" % (adb.user, pkg), 15)
@@ -3105,7 +3109,6 @@ def linha_android(r):
 
 def linha_ram(r):
     real = r.get("ram_real_mb")
-    livre = kb_mb(r.get("ram_disponivel_kb"))
     fonte = r.get("ram_fonte") or "meminfo"
     base = "RAM física estimada: %s, lida em %s. MemFree: %s. Disponível para apps (MemAvailable ou livre + cache): %s." % (
         ("%d MB" % real) if real else "não medida",
@@ -3178,6 +3181,10 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
                     continue
         except Exception:
             pass
+    # O relatório representa a execução mais recente, não mistura medições antigas.
+    inicios = [i for i, item in enumerate(metricas) if item.get("etiqueta") == "antes"]
+    if inicios:
+        metricas = metricas[inicios[-1]:]
 
     dados = {
         "gerado_em": agora_iso(),
@@ -3363,7 +3370,7 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
     say("3. Limpar em ondas. Se a imagem não voltar, a onda é desfeita.")
     say("4. Salvar o relatório em Download/SpeedTV.")
     say("")
-    say("Faça isto depois do reset de fábrica, com a depuração ligada.")
+    say("Não é necessário resetar a TV Box. Faça backup do que importa e deixe a depuração ligada.")
     if not perguntar("Começar?", True, True if sim else None):
         say("Nada foi feito.")
         return
@@ -3562,6 +3569,8 @@ def selftest():
     assert g.motivo("com.oemservice") is None
     assert "com.oemservice" in BAD_EXACT
     assert "com.abc.nexus" in BAD_EXACT
+    assert "com.android.system.ntp" in BAD_EXACT
+    assert candidatos_onda2({"com.vendor.otaupdate", "com.abc.nexus"}) == ["com.abc.nexus"]
     assert caminho_oem_ok("/vendor/lib/liboemcrypto.so")
     assert caminho_oem_ok("/vendor/lib64/liboemcrypto.so.nexo-bak")
     assert caminho_oem_ok("/vendor/lib64/liboemcrypto.so.speedtv-bak")
