@@ -34,17 +34,17 @@ const ONDAS = [
     n: "04",
     nome: "Relatório",
     texto:
-      "Um texto na pasta SpeedTV: antes e depois, a lista do que saiu, a RAM verdadeira, o Android verdadeiro e o Widevine.",
+      "Um texto em Download/SpeedTV: antes e depois, a lista do que saiu, a RAM verdadeira, o Android verdadeiro e o Widevine.",
   },
 ];
 
 const MEDIDAS = [
   ["RAM", "meminfo, mapa iomem e dumpsys. Se a prop disser 4 GB e o kernel mostrar menos, o relatório marca vitrine."],
   ["Android", "SDK, release e kernel. Android 14 em kernel 4.4 é mentira de firmware, não é patch velho."],
-  ["Widevine", "Lê o nível e a biblioteca OEM. L1 de caixa genérica é vitrine até um app protegido tocar. Não existe atalho para 4K."],
+  ["Widevine", "Lê o nível. L1 de TV Box genérica é vitrine até um filme protegido tocar. Não existe atalho para 4K."],
   ["Ameaça", "Adups, OTA silenciosa e o backdoor XCPE (com.oemservice / x.cpe), que aluga o IP da casa e volta da partição /oem."],
   ["Play", "O que está desativado, escondido ou removido só para o usuário, inclusive WebView e Trichrome."],
-  ["Termux", "O relatório vai para a pasta SpeedTV, na memória interna, ao lado de Download."],
+  ["Termux", "O relatório vai para Download/SpeedTV, a pasta que abre no app Arquivos."],
 ];
 
 const COMANDOS = [
@@ -65,7 +65,7 @@ const PASSOS = [
     n: "01",
     nome: "Reset de fábrica",
     texto:
-      "Caixa usada começa pelo recovery. O furinho RESET fica no fundo, em geral ao lado da entrada AV. Segure com um clipe, ligue na tomada e segure uns dez segundos. Wipe cache, depois Wipe data / factory reset, depois Reboot. Se a HDMI ficar preta, use o cabo amarelo de vídeo ou outra porta da TV. O controle quase nunca anda nesse menu: use um teclado USB. O reset apaga conta e app. Não apaga vírus gravado na firmware.",
+      "TV Box usada começa pelo recovery. O furinho RESET fica no fundo, em geral ao lado da entrada AV. Segure com um clipe, ligue na tomada e segure uns dez segundos. Wipe cache, depois Wipe data / factory reset, depois Reboot. Se a HDMI ficar preta, use o cabo amarelo de vídeo ou outra porta da TV. O controle quase nunca anda nesse menu: use um teclado USB. O reset apaga conta e aplicativo. Não apaga vírus gravado na firmware.",
   },
   {
     n: "02",
@@ -83,7 +83,7 @@ const PASSOS = [
     n: "04",
     nome: "Escolher 1",
     texto:
-      "No Termux, os comandos abaixo. Dentro do agente, só a opção 1. Ela lê, pergunta se desativa vírus e app de fábrica, limpa em ondas e grava o relatório na pasta SpeedTV.",
+      "No Termux, cole o bloco inteiro. Dentro do agente, escolha 1. O relatório fica em Download/SpeedTV.",
   },
 ];
 
@@ -94,7 +94,7 @@ function Tutorial() {
         <p className="font-mono text-xs tracking-widest text-amber">PRIMEIRA VEZ</p>
         <h2 className="mt-2 font-display text-4xl leading-none text-fg">Do reset até o relatório</h2>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-          O uso normal é uma vez por caixa, depois do reset. O agente não é um menu para ficar fuçando. A opção 1 faz o caminho inteiro e pergunta antes de desativar qualquer coisa.
+          O uso normal é uma vez por TV Box, depois do reset. Escolha 1. O agente lê, pergunta sim ou não, limpa em ondas e salva o relatório em Download/SpeedTV.
         </p>
       </section>
 
@@ -120,7 +120,7 @@ function Tutorial() {
               <li>Python 3, do site python.org.</li>
               <li>Platform-Tools, do site de desenvolvedores Android. Descompacte.</li>
               <li>No Windows, Prompt de Comando. No Mac, Terminal. Os comandos são os mesmos.</li>
-              <li>Cabo USB só se a caixa aceitar depuração por cabo. Wi-Fi basta quando a depuração sem fio está ligada.</li>
+              <li>Cabo USB só se a TV Box aceitar depuração por cabo. Wi-Fi basta quando a depuração sem fio está ligada.</li>
             </ol>
           </article>
         </div>
@@ -154,7 +154,7 @@ function Tutorial() {
           <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-fg">{`adb connect 192.168.1.88:5555
 python speedtvbox.py`}</pre>
           <p className="mt-3 text-sm leading-relaxed text-muted">
-            Troque o IP pelo da caixa. Rode na pasta onde estão o platform-tools e o arquivo baixado. Se o comando adb não existir, entre na pasta do platform-tools.
+            Troque o IP pelo da TV Box. Rode na pasta onde estão o platform-tools e o arquivo baixado. Se o comando adb não existir, entre na pasta do platform-tools.
           </p>
         </article>
       </section>
@@ -175,7 +175,7 @@ python speedtvbox.py`}</pre>
             <span className="text-fg">Limpa em ondas.</span> Calendário, telefone, mapa, impressão e telemetria. Reinicia. Se a tela inicial, a loja ou o SystemUI quebrarem, desfaz a onda.
           </li>
           <li>
-            <span className="text-fg">Relatório.</span> Pasta SpeedTV, na memória interna, ao lado de Download. Em português: apps antes e depois, o que foi desativado, RAM de vitrine contra a real, Android de vitrine contra o kernel, Widevine.
+            <span className="text-fg">Relatório.</span> Abra o app Arquivos, pasta Download, pasta SpeedTV. Em português: aplicativos antes e depois, o que foi desligado, RAM de vitrine contra a real, Android de vitrine contra o kernel, Widevine.
           </li>
         </ol>
       </section>
@@ -304,7 +304,7 @@ export function Console() {
           <h1 className="font-display text-5xl leading-none text-fg sm:text-6xl">SpeedTV Box</h1>
         </div>
         <p className="max-w-xs text-sm text-muted">
-          Versão 5. A primeira vez é a opção 1: lê, limpa e entrega o relatório.
+          Versão 6. Escolha 1. O relatório vai para Download/SpeedTV.
         </p>
       </header>
 
@@ -334,7 +334,7 @@ export function Console() {
 
       <section className="mt-8 grid gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6 lg:col-span-2">
-          <p className="font-mono text-xs text-faint">sua caixa, neste arquivo</p>
+          <p className="font-mono text-xs text-faint">sua TV Box, neste arquivo</p>
           <label className="mt-3 block text-sm text-muted" htmlFor="nexo-ip">
             IP da TV
             <input
@@ -490,8 +490,8 @@ export function Console() {
             <li>App que você instalou não entra na onda. Spyware de nome conhecido pede confirmação.</li>
             <li>Launcher atual, teclado atual e entrada HDMI são protegidos na hora, não só por lista.</li>
             <li>Widevine: nunca apaga a biblioteca. Esconde com root e o reverter devolve.</li>
-            <li>O journal e os logs vão para a pasta SpeedTV, na memória interna, ao lado de Download.</li>
-            <li>Caixa que não volta no ADB: tire da tomada 30 segundos. O reset físico desfaz o resto.</li>
+            <li>Os relatórios vão para Download/SpeedTV, a pasta que abre no app Arquivos.</li>
+            <li>Se a TV Box não voltar no ADB: tire da tomada 30 segundos. O reset físico desfaz o resto.</li>
           </ul>
         </div>
       </section>

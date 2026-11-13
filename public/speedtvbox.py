@@ -35,7 +35,7 @@ DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "5"
+VERSAO = "6"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -648,6 +648,44 @@ def parse_iomem_mb(text):
     return int(total / (1024 * 1024))
 
 
+def parse_zoneinfo_mb(text):
+    """Páginas que o kernel realmente administra. Em TV Box barata o meminfo mente; isto quase nunca."""
+    paginas = 0
+    for n in re.findall(r"managed\s+(\d+)", text or ""):
+        paginas += int(n)
+    if paginas < 4096:
+        return None
+    return max(1, (paginas * 4) // 1024)
+
+
+def parse_dmesg_mb(text):
+    m = re.search(r"Memory:\s+\d+K/(\d+)K", text or "")
+    if not m:
+        return None
+    mb = int(m.group(1)) // 1024
+    return mb or None
+
+
+def escolher_ram(meminfo_mb, zone_mb, iomem_mb, dmesg_mb, dumpsys_mb):
+    fisicas = [n for n in (zone_mb, iomem_mb, dmesg_mb) if n]
+    if fisicas:
+        real = min(fisicas)
+        if zone_mb and real == zone_mb:
+            fonte = "zoneinfo"
+        elif iomem_mb and real == iomem_mb:
+            fonte = "mapa de memória"
+        else:
+            fonte = "dmesg"
+    elif meminfo_mb:
+        real, fonte = meminfo_mb, "meminfo"
+    elif dumpsys_mb:
+        real, fonte = dumpsys_mb, "dumpsys"
+    else:
+        return None, "", False
+    mentira = bool(meminfo_mb and real and meminfo_mb > int(real * 1.25) and meminfo_mb - real > 256)
+    return real, fonte, mentira
+
+
 def parse_kernel(text):
     m = re.search(r"(\d+)\.(\d+)(?:\.\d+)?", text or "")
     if not m:
@@ -907,11 +945,11 @@ def dizer_onde(path):
         say("e aceite o acesso aos arquivos. Aí a pasta SpeedTV aparece na memória do celular.")
         return
     say("Arquivo: %s" % path)
-    if "speedtv-dados" in str(path):
-        say("Ficou só dentro do Termux. Na memória do celular não deu para criar a pasta SpeedTV.")
-        say("Rode: termux-setup-storage")
+    if "Download" in str(path) or "downloads" in str(path):
+        say("Abra o app Arquivos, pasta Download, pasta SpeedTV.")
     else:
-        say("Abra o gerenciador de arquivos, memória interna, pasta SpeedTV (ao lado de Download e DCIM).")
+        say("Ficou só dentro do Termux. Rode uma vez: termux-setup-storage")
+        say("Aceite o acesso. Aí os próximos relatórios vão para Download/SpeedTV.")
 
 
 def anexar_metricas(item):
@@ -971,9 +1009,9 @@ def coletar_dinamicos(adb):
     except Exception:
         pass
     blob = "\n".join(blocos)
-    for pkg, _rest in re.findall(r"([A-Za-z][\w.]*)/", blob):
-        if validar_pacote(pkg):
-            nomes.add(pkg)
+    for achado in re.findall(r"([A-Za-z][\w.]*)/", blob):
+        if validar_pacote(achado):
+            nomes.add(achado)
     # o resolve --brief às vezes devolve só o pacote na última linha
     for line in blob.splitlines():
         line = line.strip()
@@ -1145,6 +1183,72 @@ def frases_relatorio(r):
     return frases
 
 
+def processos_pesados(texto, instalados, gate):
+    """Processos que comem RAM e são um pacote. O núcleo do Android fica de fora."""
+    nucleo = {
+        "system_server", "surfaceflinger", "mediaserver", "mediaserver64",
+        "netd", "vold", "zygote", "zygote64", "adbd", "keystore", "installd",
+        "servicemanager", "lmkd", "logd", "audioserver", "cameraserver", "drmserver",
+        "android.hardware.graphics.composer", "tombstoned",
+    }
+    vistos = set()
+    itens = []
+    for item in parse_rss(texto or "")[:20]:
+        nome = (item.get("nome") or "").split(":")[0]
+        if nome in nucleo or nome in vistos:
+            continue
+        if not validar_pacote(nome) or nome not in instalados:
+            continue
+        vistos.add(nome)
+        motivo = gate.motivo(nome) if gate else None
+        itens.append({"pacote": nome, "kb": item.get("kb") or 0, "protegido": motivo or ""})
+    return itens
+
+
+def varrer_boot(adb):
+    """Scripts de boot que recriam vírus a cada liga. Não mexe no init principal."""
+    lista = adb.shell(
+        "grep -l -i -E 'xmrig|adups|coinhive|minergate|oemservice|nohup|classes.dex' "
+        "/system/etc/init/* /vendor/etc/init/* /system/etc/*.sh /system/bin/*.sh 2>/dev/null",
+        25,
+    )
+    achados = []
+    for linha in lista.splitlines():
+        arq = linha.strip()
+        if not re.match(r"^/[\w./\-]+$", arq):
+            continue
+        nome = arq.rsplit("/", 1)[-1]
+        protegido = nome in ("init.rc", "init.environ.rc", "ueventd.rc", "bootanim.rc") or nome.startswith("init.")
+        trecho = adb.shell("head -c 400 %s 2>/dev/null" % arq, 12)
+        achados.append({"arquivo": arq, "protegido": protegido, "trecho": (trecho or "")[:200]})
+        if len(achados) >= 12:
+            break
+    return achados
+
+
+def afastar_scripts(adb, journal, itens):
+    root = tem_root(adb)
+    if not root:
+        say("Sem root. Não dá para tirar script de boot. Dá para desativar o app, mas ele pode voltar ao ligar.")
+        return []
+    movidos = []
+    for item in itens:
+        arq = item.get("arquivo") or ""
+        if item.get("protegido"):
+            say("  deixo %s no lugar. É script do sistema. Mover isso pode impedir a TV Box de ligar." % arq)
+            continue
+        if not re.match(r"^/[\w./\-]+$", arq):
+            continue
+        bak = arq + ".speedtv-bak"
+        adb.shell("%s -c 'mv %s %s'" % (root, arq, bak), 15)
+        journal.setdefault("scripts", []).append({"de": arq, "bak": bak})
+        salvar_journal(journal)
+        movidos.append(arq)
+        say("  tirei do boot: %s" % arq)
+        say("  a cópia ficou em %s. A opção Desfazer coloca de volta." % bak)
+    return movidos
+
+
 def auditar(adb, falar=True):
     if falar:
         titulo("Auditoria forense — só leitura")
@@ -1169,17 +1273,11 @@ def auditar(adb, falar=True):
     if m:
         total_ram_dump = int(m.group(1).replace(",", "")) // 1024
 
-    real_candidates = []
-    if mem.get("MemTotal"):
-        real_candidates.append(mem["MemTotal"] // 1024)
-    if iomem_mb:
-        real_candidates.append(iomem_mb)
-    if total_ram_dump:
-        real_candidates.append(total_ram_dump)
-    real_mb = None
-    if real_candidates:
-        real_candidates.sort()
-        real_mb = real_candidates[len(real_candidates) // 2]
+    zone_txt = adb.shell("grep managed /proc/zoneinfo 2>/dev/null", 15)
+    zone_mb = parse_zoneinfo_mb(zone_txt)
+    dmesg_mb = parse_dmesg_mb(dmesg)
+    mem_mb = (mem.get("MemTotal") or 0) // 1024 or None
+    real_mb, ram_fonte, meminfo_mente = escolher_ram(mem_mb, zone_mb, iomem_mb, dmesg_mb, total_ram_dump)
 
     anuncios = []
     for k, v in props.items():
@@ -1191,6 +1289,8 @@ def auditar(adb, falar=True):
         for a in anuncios:
             if a["mb"] and a["mb"] > real_mb * 1.25 and a["mb"] - real_mb > 256:
                 mentira_ram.append(a)
+    if meminfo_mente and mem_mb:
+        mentira_ram.append({"chave": "MemTotal", "valor": "%d MB" % mem_mb, "mb": mem_mb})
 
     wide_txt = adb.shell(
         "dumpsys media.drm | grep -i -E 'widevine|securityLevel|security level|plugin|vendor' | head -n 40",
@@ -1295,6 +1395,19 @@ def auditar(adb, falar=True):
     fingerprint = props.get("ro.build.fingerprint", "")
     display = props.get("ro.build.display.id", "")
 
+    try:
+        root_ok = bool(tem_root(adb))
+    except Exception:
+        root_ok = False
+    try:
+        boot_scripts = varrer_boot(adb)
+    except Exception:
+        boot_scripts = []
+    try:
+        pesados = processos_pesados(dumpsys_mem, set(packages), Gate(coletar_dinamicos(adb)))
+    except Exception:
+        pesados = []
+
     relatorio = {
         "quando": agora_iso(),
         "serial": adb.serial,
@@ -1313,10 +1426,13 @@ def auditar(adb, falar=True):
         "cpu": cpu.strip(),
         "nucleos": ncpu,
         "ram_real_mb": real_mb,
-        "ram_meminfo_mb": (mem.get("MemTotal") or 0) // 1024,
+        "ram_fonte": ram_fonte,
+        "ram_meminfo_mb": mem_mb,
+        "ram_zone_mb": zone_mb,
         "ram_iomem_mb": iomem_mb,
+        "ram_dmesg_mb": dmesg_mb,
         "ram_dumpsys_mb": total_ram_dump,
-        "ram_disponivel_kb": mem.get("MemAvailable"),
+        "ram_disponivel_kb": mem.get("MemAvailable") or mem.get("MemFree"),
         "ram_livre_kb": mem.get("MemFree"),
         "anuncios_ram": anuncios,
         "ram_mentira": mentira_ram,
@@ -1342,6 +1458,9 @@ def auditar(adb, falar=True):
         "init_contagem": {k: len(v) for k, v in inits.items()},
         "servicos_rodando": len(servicos),
         "crash_trecho": crash.strip()[:2500],
+        "root": root_ok,
+        "boot_scripts": boot_scripts,
+        "pesados": pesados,
     }
     path = garantir_dados() / "auditoria-ultima.json"
     path.write_text(json.dumps(relatorio, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1366,11 +1485,14 @@ def imprimir_auditoria(r):
         selo = "VERSÃO MENTIROSA" if r.get("android", {}).get("mentira") else "versão"
         say("  [%s] %s" % (selo, nota))
     say("")
-    say("RAM real (mediana)  : %s" % (("%d MB" % r["ram_real_mb"]) if r.get("ram_real_mb") else "—"))
+    say("RAM de verdade       : %s (%s)" % (
+        ("%d MB" % r["ram_real_mb"]) if r.get("ram_real_mb") else "—",
+        r.get("ram_fonte") or "?",
+    ))
     say("  meminfo           : %s" % (("%d MB" % r["ram_meminfo_mb"]) if r.get("ram_meminfo_mb") else "—"))
+    say("  zoneinfo          : %s" % (("%d MB" % r["ram_zone_mb"]) if r.get("ram_zone_mb") else "sem leitura"))
     say("  mapa iomem        : %s" % (("%d MB" % r["ram_iomem_mb"]) if r.get("ram_iomem_mb") else "sem leitura"))
-    say("  dumpsys           : %s" % (("%d MB" % r["ram_dumpsys_mb"]) if r.get("ram_dumpsys_mb") else "—"))
-    say("  disponível agora  : %s" % kb_mb(r.get("ram_disponivel_kb")))
+    say("  livre agora       : %s" % kb_mb(r.get("ram_disponivel_kb")))
     if r.get("ram_mentira"):
         for a in r["ram_mentira"]:
             say("  RAM DE VITRINE    : %s = %s  (~%s MB) contra ~%s MB reais" % (
@@ -1379,7 +1501,7 @@ def imprimir_auditoria(r):
         for a in r["anuncios_ram"][:6]:
             say("  prop de memória   : %s = %s" % (a["chave"], a["valor"]))
     else:
-        say("  nenhuma prop de vitrine de RAM. O número do meminfo é o que vale.")
+        say("  as medidas batem. Não achei RAM de vitrine.")
     if r.get("dmesg_memory"):
         say("  dmesg             : %s" % r["dmesg_memory"].splitlines()[0][:180])
     say("")
@@ -1662,11 +1784,18 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
         return vistos
 
     o1 = presentes(WAVE1)
-    o2 = presentes(list(dict.fromkeys(WAVE2 + candidatos_onda2(sistema))))
+    topo = adb.shell("dumpsys meminfo | head -n 40", 20)
+    pesados = processos_pesados(topo, instalados, gate)
+    extra_ram = [p["pacote"] for p in pesados if not p.get("protegido") and (p.get("kb") or 0) >= 30000]
+    o2 = presentes(list(dict.fromkeys(WAVE2 + candidatos_onda2(sistema) + extra_ram)))
     o3 = presentes(WAVE3)
+    if pesados:
+        say("Quem mais usa RAM agora:")
+        for item in pesados[:6]:
+            say("  %s  %s%s" % (kb_mb(item.get("kb")), item.get("pacote"), "  (fica)" if item.get("protegido") else ""))
     say("")
-    say("Onda 1, %d pacotes presentes (telefone, impressão, telemetria)." % len(o1))
-    say("Onda 2, %d pacotes (anúncio, recomendação, app de telefone, loja paralela)." % len(o2))
+    say("Onda 1, %d aplicativos (telefone, impressão, telemetria)." % len(o1))
+    say("Onda 2, %d aplicativos (anúncio, recomendação, app de telefone e o que está gastando RAM à toa)." % len(o2))
     say("Onda 3, %d pacotes (Chrome, arquivos, relógio, OTA da placa) — pesa mais." % len(o3))
     say("Onda 4, ajustes: animação 0.5, Wi-Fi sem dormir, DNS, cache, 1080p se a RAM real for baixa.")
     if not perguntar("Executar as ondas 1, 2 e 4?", default_sim=True, forcar=True if sim else None):
@@ -1748,7 +1877,8 @@ def reverter(adb, sim=False):
     journal = carregar_journal()
     pkgs = list(journal.get("disabled") or [])
     tem_oem = bool(journal.get("oemcrypto"))
-    if not pkgs and not journal.get("settings") and not journal.get("wm") and not tem_oem:
+    scripts = list(journal.get("scripts") or [])
+    if not pkgs and not journal.get("settings") and not journal.get("wm") and not tem_oem and not scripts:
         say("Não há journal em %s. Nada para reverter por aqui." % garantir_dados())
         say("Se você desativou na mão, o relatório da auditoria lista os desativados.")
         return
@@ -1776,9 +1906,19 @@ def reverter(adb, sim=False):
         say("  resolução e densidade voltaram ao padrão da caixa.")
     if tem_oem:
         say(restaurar_oem(adb, tem_root(adb), journal))
+    if scripts:
+        root = tem_root(adb)
+        for item in scripts:
+            origem, bak = item.get("de") or "", item.get("bak") or ""
+            if root and re.match(r"^/[\w./\-]+$", origem) and re.match(r"^/[\w./\-]+$", bak):
+                adb.shell("%s -c 'mv %s %s'" % (root, bak, origem), 15)
+                say("  script de volta: %s" % origem)
+            else:
+                say("  não consegui devolver %s" % origem)
     journal["disabled"] = []
     journal["settings"] = []
     journal["wm"] = {}
+    journal["scripts"] = []
     journal.setdefault("notas", []).append("revertido em " + agora_iso())
     salvar_journal(journal)
     escrever_rollback(adb.serial, adb.binary, [])
@@ -2585,24 +2725,40 @@ def abrir_cmd(adb, nome):
         say("Pistas: %s" % ", ".join(tags))
 
 
-def publicar_relatorio(path):
-    """Copia para a pasta SpeedTV na raiz da memória do celular."""
-    nome = Path(path).name
+def pasta_visivel():
+    """Pasta que a pessoa abre no app Arquivos: Download/SpeedTV."""
     home = os.environ.get("HOME") or ""
     destinos = []
     if home:
-        destinos.append(Path(home) / "storage" / "shared" / "SpeedTV")
-    destinos.append(Path("/sdcard/SpeedTV"))
-    destinos.append(Path("/storage/emulated/0/SpeedTV"))
+        destinos.append(Path(home) / "storage" / "downloads" / "SpeedTV")
+        destinos.append(Path(home) / "storage" / "shared" / "Download" / "SpeedTV")
+        destinos.append(Path(home) / "storage" / "shared" / "Downloads" / "SpeedTV")
+    destinos.append(Path("/storage/emulated/0/Download/SpeedTV"))
+    destinos.append(Path("/sdcard/Download/SpeedTV"))
     for pasta in destinos:
         try:
             pasta.mkdir(parents=True, exist_ok=True)
-            destino = pasta / nome
-            shutil.copy2(path, destino)
-            return destino
+            prova = pasta / ".ok"
+            prova.write_text("1", encoding="utf-8")
+            prova.unlink()
+            return pasta
         except Exception:
             continue
     return None
+
+
+def publicar_relatorio(path):
+    """Copia para Download/SpeedTV, a pasta que abre no app Arquivos."""
+    nome = Path(path).name
+    pasta = pasta_visivel()
+    if not pasta:
+        return None
+    try:
+        destino = pasta / nome
+        shutil.copy2(path, destino)
+        return destino
+    except Exception:
+        return None
 
 
 OEM_RE = re.compile(
@@ -2863,11 +3019,14 @@ def linha_android(r):
 def linha_ram(r):
     real = r.get("ram_real_mb")
     livre = kb_mb(r.get("ram_disponivel_kb"))
-    base = "RAM verdadeira %s. Livre agora %s." % (("%d MB" % real) if real else "não medida", livre)
+    fonte = r.get("ram_fonte") or "meminfo"
+    base = "RAM de verdade: %s, lida em %s. Livre agora: %s." % (
+        ("%d MB" % real) if real else "não medida", fonte, livre,
+    )
     if r.get("ram_mentira"):
-        vitrine = ", ".join("%s MB" % a["mb"] for a in r["ram_mentira"])
-        return base + " A vitrine anuncia %s. Vale a verdadeira." % vitrine
-    return base + " Sem anúncio de RAM acima da medida."
+        vitrine = ", ".join("%s MB" % a["mb"] for a in r["ram_mentira"] if a.get("mb"))
+        return base + " A vitrine diz %s. Ignore a vitrine." % vitrine
+    return base + " Não achei anúncio maior do que a medida."
 
 
 def linha_wide(r):
@@ -2875,26 +3034,40 @@ def linha_wide(r):
 
 
 def mostrar_leitura(r, lixo):
-    titulo("O que a caixa é")
+    titulo("O que esta TV Box é")
     say("%s %s" % (r.get("marca") or "?", r.get("modelo") or "?"))
     say(linha_android(r))
     say(linha_ram(r))
+    say("Root: %s." % ("sim. Dá para tirar script de boot." if r.get("root") else "não. Dá para desligar app, mas script de boot fica."))
     say(linha_wide(r))
     say(
-        "Pacotes: %s no total, %s de sistema, %s que alguém instalou."
+        "Aplicativos: %s no total, %s do sistema, %s instalados por alguém."
         % (r.get("pacotes"), r.get("sistema"), r.get("terceiros"))
     )
+    pesados = r.get("pesados") or []
+    if pesados:
+        say("Quem mais usa RAM:")
+        for item in pesados[:6]:
+            destino = "fica, é necessário" if item.get("protegido") else "pode sair na limpeza"
+            say("  %s  %s  (%s)" % (kb_mb(item.get("kb")), item.get("pacote"), destino))
     ruins = nomes_de_risco(r)
     if ruins:
         say("Risco: %s." % ", ".join(ruins))
-        say("Desativar impede o serviço de subir. Não apaga o arquivo da firmware.")
+        say("Desligar impede de subir. Não apaga o arquivo da firmware.")
     else:
         say("Risco: nenhum nome da lista (Adups, XCPE, miner).")
+    scripts = r.get("boot_scripts") or []
+    if scripts:
+        say("Script de boot suspeito (pode recriar vírus toda vez que liga):")
+        for item in scripts:
+            say("  %s" % item.get("arquivo"))
+    else:
+        say("Nenhum script de boot com nome de vírus.")
     if lixo:
         say("Veio de fábrica e não é sistema: %s." % ", ".join("%s (%s)" % (rot, pkg) for pkg, rot in lixo))
     else:
         say("Não achei Netflix, Kodi, Prime ou Disney pré-instalados.")
-    say("Não mexo em Play Store, GMS, WebView, launcher, teclado, HDMI nem no vídeo do sistema.")
+    say("Não mexo em Play Store, serviços do Google, WebView, launcher, teclado, HDMI nem no vídeo do sistema.")
     say("Calendário, telefone, mapa e impressão podem sair. Não são codec.")
 
 
@@ -2902,7 +3075,7 @@ def montar_relatorio_final(antes, depois, desligados, lixo):
     fim = depois or antes
     linhas = [
         "SPEEDTV BOX — RELATÓRIO",
-        "Caixa: %s %s" % (antes.get("marca") or "?", antes.get("modelo") or "?"),
+        "TV Box: %s %s" % (antes.get("marca") or "?", antes.get("modelo") or "?"),
         "Quando: %s" % (fim.get("quando") or ""),
         "ADB: %s" % (antes.get("serial") or ""),
         "",
@@ -2918,7 +3091,7 @@ def montar_relatorio_final(antes, depois, desligados, lixo):
         "",
         "WIDEVINE",
         "  " + linha_wide(antes),
-        "  L1 de caixa genérica só vale se um filme protegido tocar em HD.",
+        "  L1 de TV Box genérica só vale se um filme protegido tocar em HD.",
         "  Sem root o nível não muda. Com root, a opção Widevine esconde a biblioteca falsa",
         "  e o Android assume L3 de verdade, em SD.",
         "",
@@ -2951,7 +3124,7 @@ def montar_relatorio_final(antes, depois, desligados, lixo):
     if ruins:
         linhas.append("  Encontrado: " + ", ".join(ruins))
         linhas.append("  Se o nome voltar ligado sozinho depois de reiniciar, a firmware recolocou.")
-        linhas.append("  Aí a caixa não é confiável na sua rede.")
+        linhas.append("  Aí a TV Box não é confiável na sua rede.")
     else:
         linhas.append("  Nenhum nome da lista conhecida.")
     linhas += [
@@ -2965,12 +3138,12 @@ def montar_relatorio_final(antes, depois, desligados, lixo):
 
 
 def primeira_vez(adb, sim=False, sem_onda3=False):
-    titulo("Primeira vez")
-    say("Quatro passos, nesta ordem. Não precisa caçar número no menu.")
-    say("1. Ler a caixa, sem desativar nada.")
-    say("2. Se houver vírus ou backdoor, desativar.")
-    say("3. Limpar o lixo em ondas. Se a TV não voltar, a onda é desfeita.")
-    say("4. Gravar um relatório em português na pasta SpeedTV.")
+    titulo("Começar")
+    say("Quatro passos. Você só responde sim ou não.")
+    say("1. Ler a TV Box, sem desligar nada.")
+    say("2. Se houver vírus, backdoor ou script de boot, tirar.")
+    say("3. Limpar em ondas. Se a imagem não voltar, a onda é desfeita.")
+    say("4. Salvar o relatório em Download/SpeedTV.")
     say("")
     say("Faça isto depois do reset de fábrica, com a depuração ligada.")
     if not perguntar("Começar?", True, True if sim else None):
@@ -2992,9 +3165,18 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
         if perguntar("Desativar o risco agora (%s)?" % ", ".join(ruins), True, True if sim else None):
             desativar(adb, Gate(coletar_dinamicos(adb)), journal, ruins, "virus")
         else:
-            say("Deixei o risco ligado. Se for o XCPE, tire a caixa da internet.")
+            say("Deixei o risco ligado. Se for o XCPE, tire a TV Box da internet.")
     else:
-        say("Passo 2: sem nome de risco.")
+        say("Passo 2: sem nome de vírus na lista.")
+
+    scripts = [s for s in (antes.get("boot_scripts") or []) if not s.get("protegido")]
+    if scripts:
+        say("")
+        say("Estes scripts sobem junto com a TV Box. É assim que o vírus volta depois do reset.")
+        if perguntar("Tirar do boot? Fica uma cópia para desfazer.", True, True if sim else None):
+            afastar_scripts(adb, journal, scripts)
+        else:
+            say("Deixei os scripts. Se for vírus, ele volta na próxima vez que ligar.")
 
     if lixo:
         say("")
@@ -3028,17 +3210,18 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
 def menu(adb, sim=False, sem_onda3=False):
     while True:
         titulo("SpeedTV Box %s" % VERSAO)
-        say("Caixa: %s    Gemini: %s" % (adb.serial, MODELO))
-        say("Dados: %s" % garantir_dados())
+        say("TV Box: %s" % adb.serial)
+        visivel = pasta_visivel()
+        if visivel:
+            say("Relatórios: Download/SpeedTV")
+        else:
+            say("Relatórios ainda dentro do Termux. Rode: termux-setup-storage")
         say("")
-        say("Faça nesta ordem, uma vez, depois do reset de fábrica:")
-        say("  1  Primeira vez — ler, limpar e entregar o relatório")
-        say("")
-        say("Se precisar de novo:")
+        say("  1  Começar agora")
         say("  2  Só olhar")
-        say("  3  Continuar a limpeza")
-        say("  4  Reparar a Play Store")
-        say("  5  Outras coisas")
+        say("  3  Limpar de novo")
+        say("  4  Consertar a Play Store")
+        say("  5  Mais opções")
         say("  0  Sair")
         try:
             escolha = input("\nOpção: ").strip()
@@ -3061,7 +3244,7 @@ def menu(adb, sim=False, sem_onda3=False):
             else:
                 say("Não conheço essa opção. Na primeira vez, é a 1.")
         except DeviceOffline as exc:
-            say("A caixa saiu do ADB: %s" % exc)
+            say("A TV Box saiu do ADB: %s" % exc)
         except SystemExit:
             raise
         except KeyboardInterrupt:
@@ -3072,10 +3255,10 @@ def menu(adb, sim=False, sem_onda3=False):
 
 
 def outras(adb, sim=False, sem_onda3=False):
-    titulo("Outras coisas")
-    say("  1  Segurança (backdoor e adware)")
-    say("  2  Widevine (ler, L3 de verdade, ou restaurar)")
-    say("  3  Afinar (cache, rede, ficar ligada, 1080p)")
+    titulo("Mais opções")
+    say("  1  Vírus e backdoor")
+    say("  2  Widevine")
+    say("  3  Deixar mais rápida")
     say("  4  Desfazer o que o SpeedTV Box mudou")
     say("  5  Perguntar ao Gemini")
     say("  6  Ferramentas")
@@ -3191,7 +3374,17 @@ def selftest():
     assert "com.oemservice" in texto
     assert "com.android.calendar" in texto
     assert achar_lixo(["org.xbmc.kodi", "com.android.vending"]) == [("org.xbmc.kodi", "Kodi")]
-    assert achar_lixo(["com.google.android.gms"]) == []
+    assert escolher_ram(4096, 1024, 4096, None, 4096) == (1024, "zoneinfo", True)
+    assert escolher_ram(1024, None, None, None, None) == (1024, "meminfo", False)
+    amostra = "com.android.tv.settings/com.android.tv.settings.MainSettings\n"
+    assert re.findall(r"([A-Za-z][\w.]*)/", amostra) == ["com.android.tv.settings"]
+    pesados = processos_pesados(
+        "    80,000K: com.android.calendar (pid 1)\n    90,000K: system_server (pid 2)\n",
+        {"com.android.calendar"},
+        Gate(),
+    )
+    assert pesados and pesados[0]["pacote"] == "com.android.calendar"
+    assert parse_zoneinfo_mb("managed  262144\n") == 1024
     data = extrair_json("```json\n{\"diagnostico\": \"webview\", \"acoes\": []}\n```")
     assert data["diagnostico"] == "webview"
     nomes = parse_pm_names("package:com.android.vending\npackage:/system/app/X.apk=com.foo.bar\n")
