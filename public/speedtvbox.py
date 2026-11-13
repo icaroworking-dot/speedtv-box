@@ -3161,6 +3161,130 @@ def mostrar_leitura(r, lixo):
     say("Calendário, telefone, mapa e impressão podem sair. Não são codec.")
 
 
+
+def gerar_relatorio_visual(antes, depois, desligados, lixo):
+    """Gera um relatório HTML offline e JSON com inventário e métricas por etapa."""
+    pasta = garantir_dados()
+    metricas = []
+    arquivo_metricas = pasta / "metricas.jsonl"
+    if arquivo_metricas.is_file():
+        try:
+            for linha in arquivo_metricas.read_text(encoding="utf-8").splitlines():
+                try:
+                    item = json.loads(linha)
+                    if isinstance(item, dict):
+                        metricas.append(item)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    dados = {
+        "gerado_em": agora_iso(),
+        "dispositivo": {
+            "marca": antes.get("marca"), "modelo": antes.get("modelo"),
+            "plataforma": antes.get("plataforma"), "abi": antes.get("abi"),
+            "android": antes.get("release"), "sdk": antes.get("sdk"),
+            "kernel": antes.get("kernel"),
+        },
+        "antes": antes,
+        "depois": depois,
+        "desativados_nesta_sessao": desligados or [],
+        "apps_de_fabrica_detectados": [
+            {"pacote": pkg, "nome": nome} for pkg, nome in (lixo or [])
+        ],
+        "metricas_por_etapa": metricas,
+    }
+    json_path = pasta / "relatorio.json"
+    json_path.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def esc(valor):
+        return html.escape(str(valor if valor is not None else "—"))
+
+    def card(rotulo, valor, detalhe=""):
+        return '<article class="card"><small>%s</small><strong>%s</strong><span>%s</span></article>' % (
+            esc(rotulo), esc(valor), esc(detalhe)
+        )
+
+    def grafico(titulo_grafico, chave, unidade=""):
+        valores = []
+        for item in metricas:
+            valor = item.get(chave)
+            if isinstance(valor, (int, float)):
+                valores.append((item.get("etiqueta") or "etapa", valor))
+        if not valores:
+            return '<section class="panel"><h2>%s</h2><p>Sem amostras suficientes.</p></section>' % esc(titulo_grafico)
+        maximo = max([v for _, v in valores] + [1])
+        barras = []
+        for nome, valor in valores:
+            largura = max(2, min(100, int((valor / maximo) * 100)))
+            barras.append(
+                '<div class="barrow"><label>%s</label><div class="track"><i style="width:%d%%"></i></div><b>%s%s</b></div>'
+                % (esc(nome), largura, esc(round(valor, 1)), esc(unidade))
+            )
+        return '<section class="panel"><h2>%s</h2>%s</section>' % (esc(titulo_grafico), "".join(barras))
+
+    linhas = []
+    for item in metricas:
+        linhas.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            esc(item.get("etiqueta")),
+            esc(kb_mb(item.get("mem_available_kb"))),
+            esc(item.get("processos")),
+            esc(item.get("desativados")),
+            esc(kb_mb(item.get("data_livre_kb"))),
+        ))
+    if not linhas:
+        linhas.append("<tr><td colspan='5'>Sem métricas coletadas.</td></tr>")
+    pacotes = "".join("<li>%s</li>" % esc(pkg) for pkg in (desligados or []))
+    if not pacotes:
+        pacotes = "<li>Nenhum pacote desativado nesta sessão.</li>"
+
+    dispositivo = "%s %s · %s · Android %s (SDK %s) · kernel %s" % (
+        antes.get("marca") or "Marca não identificada",
+        antes.get("modelo") or "",
+        antes.get("plataforma") or "SoC não identificado",
+        antes.get("release") or "?",
+        antes.get("sdk") or "?",
+        antes.get("kernel") or "?",
+    )
+    ram_antes = kb_mb(antes.get("ram_usavel_kb") or antes.get("ram_disponivel_kb"))
+    ram_depois = kb_mb((depois or {}).get("ram_usavel_kb") or (depois or {}).get("ram_disponivel_kb"))
+    html_doc = """<!doctype html>
+<html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SpeedTV Box — Relatório</title>
+<style>
+:root{color-scheme:dark;--bg:#07101f;--panel:#101d31;--line:#263852;--text:#eef5ff;--muted:#a8b8cf;--accent:#65d8f2}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0,#152b48,var(--bg) 45%);color:var(--text);font:15px system-ui,sans-serif;padding:24px}
+main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid var(--line)}h1{font-size:clamp(2rem,5vw,3.5rem);margin:5px 0}h2{font-size:1.15rem;margin:0 0 18px}p,small,span{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0}
+.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}.card small,.card strong,.card span{display:block}.card strong{font-size:1.65rem;margin:8px 0;color:var(--text)}.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:14px 0}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:12px 0;font-size:.85rem}.track{height:10px;background:#24354d;border-radius:99px;overflow:hidden}.track i{display:block;height:100%;background:linear-gradient(90deg,#3d9edb,var(--accent));border-radius:99px}.barrow b{text-align:right}.panel{margin:14px 0;overflow:auto}table{width:100%;border-collapse:collapse;font-size:.88rem}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:var(--accent)}ul{columns:2;overflow-wrap:anywhere}footer{padding:24px 0;color:var(--muted);font-size:.8rem}@media(max-width:600px){body{padding:14px}.barrow{grid-template-columns:90px 1fr 55px}ul{columns:1}}
+</style><main>
+<header><small>SPEEDTV BOX · AUDITORIA E DEBLOAT</small><h1>Relatório da TV Box</h1><p>Gerado em %s</p><p>%s</p></header>
+<div class="grid">%s</div>
+<div class="columns">%s%s</div>
+<section class="panel"><h2>Métricas por etapa</h2><table><thead><tr><th>Etapa</th><th>RAM disponível</th><th>Processos</th><th>Desativados</th><th>Armazenamento livre</th></tr></thead><tbody>%s</tbody></table></section>
+<section class="panel"><h2>Pacotes desativados nesta sessão</h2><ul>%s</ul></section>
+<section class="panel"><h2>Como interpretar</h2><p>MemAvailable (ou livre + cache nos kernels antigos) é a referência de RAM disponível; MemFree isolado não representa a memória utilizável. Variações dependem do tempo desde o boot, cache e aplicativos abertos.</p><p>A contagem de processos é aproximada e não mede desempenho por si só.</p><p>Esta auditoria procura indicadores conhecidos e não certifica que o firmware está livre de malware.</p><p>Widevine informado pelo sistema não comprova certificação de streaming; só a reprodução protegida confirma o comportamento real.</p></section>
+<footer>SpeedTV Box · relatório local, sem bibliotecas ou serviços externos.</footer></main></html>""" % (
+        esc(agora_iso()), esc(dispositivo),
+        card("RAM física estimada", (str(antes.get("ram_real_mb")) + " MB") if antes.get("ram_real_mb") else "Não medida", antes.get("ram_fonte")),
+        card("Pacotes instalados", antes.get("pacotes"), "antes") +
+        card("Pacotes instalados", (depois or {}).get("pacotes"), "depois" if depois else "sem leitura final") +
+        card("Desativados nesta sessão", len(desligados or []), "ações registradas") +
+        card("RAM disponível", ram_antes, "antes") +
+        card("RAM disponível", ram_depois, "depois"),
+        grafico("RAM disponível ao longo das ondas", "mem_available_kb", " kB"),
+        grafico("Processos por etapa", "processos"),
+        "".join(linhas),
+        pacotes,
+    )
+    html_path = pasta / "relatorio.html"
+    html_path.write_text(html_doc, encoding="utf-8")
+    return {
+        "html": publicar_relatorio(html_path) or html_path,
+        "json": publicar_relatorio(json_path) or json_path,
+    }
+
+
 def montar_relatorio_final(antes, depois, desligados, lixo):
     fim = depois or antes
     linhas = [
@@ -3292,9 +3416,13 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
     desligados = [pkg for pkg in (journal.get("disabled") or []) if pkg not in ja]
     texto = montar_relatorio_final(antes, depois, desligados, lixo)
     log = anexar_log("relatorio", texto, texto)
+    visual = gerar_relatorio_visual(antes, depois, desligados, lixo)
     titulo("Relatório")
     say(texto)
     dizer_onde(log)
+    if visual:
+        say("Relatório visual offline: %s" % visual.get("html"))
+        say("Dados estruturados: %s" % visual.get("json"))
 
 
 def menu(adb, sim=False, sem_onda3=False):
