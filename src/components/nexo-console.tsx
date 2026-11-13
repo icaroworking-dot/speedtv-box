@@ -187,7 +187,7 @@ python speedtvbox.py`}</pre>
             <span className="text-fg">Limpa em ondas.</span> Perfis conhecidos de telemetria, anúncios, apps de telefone, mapas, recomendações e utilitários de fábrica, além dos grupos opcionais. Mede e reinicia entre etapas; se a tela inicial, a loja ou o SystemUI falharem, desfaz a onda que causou o problema.
           </li>
           <li>
-            <span className="text-fg">Relatório.</span> Abra Arquivos > Download > SpeedTV > Sessoes. Cada pasta contém um relatório HTML visual, resumo TXT, dados técnicos e logs da execução. e gráficos por etapa.
+            <span className="text-fg">Relatório.</span> Abra Arquivos &gt; Download &gt; SpeedTV &gt; Sessoes. Cada pasta contém um relatório HTML visual, resumo TXT, dados técnicos e logs da execução.
           </li>
         </ol>
       </section>
