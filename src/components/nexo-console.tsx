@@ -235,13 +235,13 @@ async function shaCurto(texto: string): Promise<string> {
 }
 
 function formatarIp(valor: string): string {
-  const digitos = valor.replace(/\\D/g, "").slice(0, 12);
+  const digitos = valor.replace(/\D/g, "").slice(0, 12);
   return (digitos.match(/.{1,3}/g) || []).join(".");
 }
 
 function normalizarChave(valor: string): string {
   // Chaves Gemini não contêm espaços; remove espaços/quebras vindos da cópia.
-  return valor.replace(/\\s+/g, "");
+  return valor.replace(/\s+/g, "");
 }
 
 function personalizar(texto: string, ip: string, api: string): string {
