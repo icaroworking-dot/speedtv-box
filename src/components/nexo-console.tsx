@@ -9,7 +9,7 @@ import {
   Store,
 } from "lucide-react";
 
-const FILE = "/speedtvbox.py";
+const FILE = `${import.meta.env.BASE_URL}speedtvbox.py`;
 
 const ONDAS = [
   {
@@ -206,9 +206,23 @@ python speedtvbox.py`}</pre>
 }
 
 async function lerAgente(): Promise<string> {
-  const res = await fetch(FILE);
-  if (!res.ok) throw new Error("não carregou o agente");
-  return res.text();
+  const res = await fetch(FILE, {
+    cache: "no-store",
+    headers: { Accept: "text/plain, text/x-python, */*" },
+  });
+  if (!res.ok) {
+    throw new Error(`O servidor não entregou o agente (HTTP ${res.status}). Atualize a página e tente novamente.`);
+  }
+  const texto = await res.text();
+  if (
+    !/DISPOSITIVO_PADRAO\\s*=\\s*"/.test(texto) ||
+    !/API_KEY_PADRAO\\s*=\\s*"/.test(texto)
+  ) {
+    throw new Error(
+      "O endereço do agente devolveu uma página em vez do arquivo Python. Avise que o download está indisponível."
+    );
+  }
+  return texto;
 }
 
 async function shaCurto(texto: string): Promise<string> {
@@ -236,20 +250,21 @@ function personalizar(texto: string, ip: string, api: string): string {
   }
   const comIp = texto.replace(/DISPOSITIVO_PADRAO = "[^"]*"/, `DISPOSITIVO_PADRAO = "${alvo}"`);
   const pronto = comIp.replace(/API_KEY_PADRAO = "[^"]*"/, `API_KEY_PADRAO = "${chave}"`);
-  if (pronto === texto) throw new Error("Não achei onde gravar IP e chave neste arquivo.");
+  if (
+    comIp === texto ||
+    pronto === comIp ||
+    !pronto.includes(`DISPOSITIVO_PADRAO = "${alvo}"`) ||
+    !pronto.includes(`API_KEY_PADRAO = "${chave}"`)
+  ) {
+    throw new Error("Não consegui gravar o IP e a chave no agente. Atualize a página e tente novamente.");
+  }
   return pronto;
 }
 
-function baixar(texto: string, nome: string) {
-  const blob = new Blob([texto], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nome;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+function criarArquivo(texto: string): string {
+  return URL.createObjectURL(
+    new Blob(["\\uFEFF", texto], { type: "text/plain;charset=utf-8" })
+  );
 }
 
 export function Console() {
@@ -260,19 +275,27 @@ export function Console() {
   const [ip, setIp] = useState("192.168.1.88:5555");
   const [api, setApi] = useState("");
   const [lembrarChave, setLembrarChave] = useState(false);
+  const [downloadPy, setDownloadPy] = useState("");
+  const [downloadTxt, setDownloadTxt] = useState("");
   const [aba, setAba] = useState<"baixar" | "tutorial">("baixar");
 
   useEffect(() => {
     let vivo = true;
-    const ipSalvo = localStorage.getItem("speedtv-ip") || localStorage.getItem("nexo-ip");
-    const apiSalva = localStorage.getItem("speedtv-api") || localStorage.getItem("nexo-api");
+    let ipSalvo = "";
+    let apiSalva = "";
+    try {
+      ipSalvo = localStorage.getItem("speedtv-ip") || localStorage.getItem("nexo-ip") || "";
+      apiSalva = localStorage.getItem("speedtv-api") || localStorage.getItem("nexo-api") || "";
+    } catch {
+      // Armazenamento bloqueado não pode impedir o uso do gerador.
+    }
     if (ipSalvo) setIp(ipSalvo);
     if (apiSalva) {
       setApi(apiSalva);
       setLembrarChave(true);
     }
     lerAgente()
-      .then(async (texto) => {
+      .then((texto) => {
         if (!vivo) return;
         setCodigo(texto);
         if (!ipSalvo) {
@@ -283,20 +306,22 @@ export function Console() {
           const achado = texto.match(/API_KEY_PADRAO = "([^"]+)"/);
           if (achado) setApi(achado[1]);
         }
-        setHash(await shaCurto(texto));
+        shaCurto(texto).then(setHash).catch(() => setHash("não disponível"));
       })
-      .catch(() => {
-        if (vivo) setAviso("O arquivo do agente não carregou. Recarregue a página.");
+      .catch((erro) => {
+        if (vivo) setAviso(erro instanceof Error ? erro.message : "Não consegui carregar o agente.");
       });
     return () => {
       vivo = false;
     };
   }, []);
 
-  function comPersonalizado(fn: (texto: string) => void) {
-    comTexto((bruto) => {
+  async function comPersonalizado(fn: (texto: string) => void | Promise<void>) {
+    try {
+      const bruto = codigo || (await lerAgente());
+      if (!codigo) setCodigo(bruto);
+      const pronto = personalizar(bruto, ip, api);
       try {
-        const pronto = personalizar(bruto, ip, api);
         localStorage.setItem("speedtv-ip", ip.trim());
         if (lembrarChave) {
           localStorage.setItem("speedtv-api", api.trim());
@@ -304,22 +329,21 @@ export function Console() {
           localStorage.removeItem("speedtv-api");
           localStorage.removeItem("nexo-api");
         }
-        fn(pronto);
-      } catch (erro) {
-        setAviso(erro instanceof Error ? erro.message : "Não deu para montar o arquivo.");
+      } catch {
+        // Preferências são opcionais; falha de storage nunca bloqueia a geração.
       }
-    });
-  }
-
-  async function comTexto(fn: (texto: string) => void) {
-    try {
-      const texto = codigo || (await lerAgente());
-      if (!codigo) setCodigo(texto);
-      fn(texto);
-    } catch {
-      setAviso("Não consegui ler o agente.");
+      await fn(pronto);
+    } catch (erro) {
+      setAviso(erro instanceof Error ? erro.message : "Não deu para montar o arquivo.");
     }
   }
+
+  useEffect(() => {
+    return () => {
+      if (downloadPy) URL.revokeObjectURL(downloadPy);
+      if (downloadTxt) URL.revokeObjectURL(downloadTxt);
+    };
+  }, [downloadPy, downloadTxt]);
 
   return (
     <main className="mx-auto max-w-5xl px-4 pb-24 pt-8 sm:px-6 sm:pt-12">
@@ -415,17 +439,27 @@ export function Console() {
             <button
               type="button"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-amber px-4 text-sm font-semibold text-amber-ink"
-              onClick={() => comPersonalizado((t) => baixar(t, "speedtvbox.py"))}
+              onClick={() =>
+                void comPersonalizado((t) => {
+                  setDownloadPy(criarArquivo(t));
+                  setAviso("Agente personalizado pronto. Agora toque em “Salvar .py” logo abaixo.");
+                })
+              }
             >
               <Download className="size-4" aria-hidden="true" />
-              Baixar .py
+              Gerar .py
             </button>
             <button
               type="button"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-bg-raised px-4 text-sm text-fg"
-              onClick={() => comPersonalizado((t) => baixar(t, "speedtvbox.txt"))}
+              onClick={() =>
+                void comPersonalizado((t) => {
+                  setDownloadTxt(criarArquivo(t));
+                  setAviso("Arquivo de texto pronto. Agora toque em “Salvar .txt” logo abaixo.");
+                })
+              }
             >
-              Baixar .txt
+              Gerar .txt
             </button>
             <button
               type="button"
@@ -441,10 +475,36 @@ export function Console() {
               Copiar
             </button>
           </div>
-          {hash ? (
-            <p className="mt-3 font-mono text-xs text-faint">sha256 {hash}…</p>
+          {(downloadPy || downloadTxt) ? (
+            <div className="mt-4 rounded-xl border border-line bg-bg-raised p-3">
+              <p className="text-sm font-semibold text-fg">Arquivo pronto para salvar</p>
+              <p className="mt-1 text-xs text-muted">Toque no link do arquivo. Esta segunda etapa usa um link real de download, mais confiável no Chrome do Android.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {downloadPy ? (
+                  <a
+                    href={downloadPy}
+                    download="speedtvbox.py"
+                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-amber px-4 text-sm font-semibold text-amber-ink"
+                  >
+                    Salvar .py
+                  </a>
+                ) : null}
+                {downloadTxt ? (
+                  <a
+                    href={downloadTxt}
+                    download="speedtvbox.txt"
+                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-line px-4 text-sm text-fg"
+                  >
+                    Salvar .txt
+                  </a>
+                ) : null}
+              </div>
+            </div>
           ) : null}
-          {aviso ? <p className="mt-3 text-sm text-fg">{aviso}</p> : null}
+          {hash ? (
+            <p className="mt-3 font-mono text-xs text-faint">SHA-256 do agente-base: {hash}</p>
+          ) : null}
+          {aviso ? <p role="status" aria-live="polite" className="mt-3 text-sm text-fg">{aviso}</p> : null}
         </div>
 
         <aside className="rounded-2xl border border-line bg-bg-raised p-5">
