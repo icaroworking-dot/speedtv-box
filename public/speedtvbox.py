@@ -1326,22 +1326,22 @@ def parse_servicos_atividade(texto, instalados=None):
     """Extrai ServiceRecord do ActivityManager."""
     instalados = set(instalados or [])
     itens = []
-    blocos = re.split(r"(?m)(?=^\\s*\\* ServiceRecord\\{)", texto or "")
+    blocos = re.split(r"(?m)(?=^\s*\* ServiceRecord\{)", texto or "")
     for bloco in blocos:
         if "ServiceRecord{" not in bloco:
             continue
-        mp = re.search(r"(?m)^\\s*packageName=([A-Za-z][A-Za-z0-9_.]+)", bloco)
+        mp = re.search(r"(?m)^\s*packageName=([A-Za-z][A-Za-z0-9_.]+)", bloco)
         if not mp:
             continue
         pkg = mp.group(1)
         if not validar_pacote(pkg):
             continue
-        mi = re.search(r"(?m)^\\s*intent=\\{[^\\n]*?cmp=([^\\s}]+)", bloco)
+        mi = re.search(r"(?m)^\s*intent=\{[^\n]*?cmp=([^\s}]+)", bloco)
         componente = mi.group(1) if mi else pkg
-        proc = re.search(r"(?m)^\\s*processName=([^\\s]+)", bloco)
-        started = re.search(r"\\bstartRequested=(true|false)", bloco)
-        fg = re.search(r"\\bcreatedFromFg=(true|false)", bloco)
-        restart = re.search(r"\\brestartCount=(\\d+)", bloco)
+        proc = re.search(r"(?m)^\s*processName=([^\s]+)", bloco)
+        started = re.search(r"\bstartRequested=(true|false)", bloco)
+        fg = re.search(r"\bcreatedFromFg=(true|false)", bloco)
+        restart = re.search(r"\brestartCount=(\d+)", bloco)
         itens.append({
             "pacote": pkg, "componente": componente,
             "processo": proc.group(1) if proc else pkg,
