@@ -357,6 +357,24 @@ export function Console() {
       ) : (
         <>
 
+      <section className="mt-6 rounded-2xl border border-line bg-bg-raised p-4 sm:p-5">
+        <p className="font-mono text-xs tracking-widest text-amber">COMECE POR AQUI</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div>
+            <p className="font-display text-2xl text-fg">1. Configure</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted">Informe o IP da TV Box e sua chave Gemini. O IP já vem preenchido como exemplo.</p>
+          </div>
+          <div>
+            <p className="font-display text-2xl text-fg">2. Baixe</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted">Toque em Baixar .py. O arquivo já sai personalizado para seu aparelho.</p>
+          </div>
+          <div>
+            <p className="font-display text-2xl text-fg">3. Execute</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted">Cole o bloco no Termux do celular e escolha 1 no assistente para começar.</p>
+          </div>
+        </div>
+      </section>
+
       <section className="mt-8 grid gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6 lg:col-span-2">
           <p className="font-mono text-xs text-faint">sua TV Box, neste arquivo</p>
