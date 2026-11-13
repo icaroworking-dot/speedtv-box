@@ -3993,6 +3993,7 @@ def auditar_rede(adb):
     dns=adb.shell("ping -c 2 -W 2 google.com 2>/dev/null",15)
     dns_ok=bool(re.search(r"bytes from|\d+ packets transmitted, [1-9]\d* received",dns,re.I))
     sleep=setting_get(adb,"global","wifi_sleep_policy"); root=bool(tem_root(adb))
+    curl=adb.shell("command -v curl 2>/dev/null",10).strip()
     band="5 GHz" if freq and freq>=5000 else "2,4 GHz" if freq and freq<3000 else "não identificada"
     signal="bom" if rssi is not None and rssi>=-60 else "mediano" if rssi is not None and rssi>=-67 else "fraco" if rssi is not None else "não informado"
     verdict=("Conexão com bons sinais para IPTV; teste curto não garante estabilidade por horas." if loss==0 and avg is not None and avg<50 and signal!="fraco" else "Há indícios de instabilidade; aproxime a TV Box do roteador ou teste Ethernet." if (loss is not None and loss>0) or signal=="fraco" else "Diagnóstico inconclusivo; repita o teste em outro horário.")
@@ -4000,19 +4001,30 @@ def auditar_rede(adb):
     say("• Perda %s | latência %s | DNS %s"%(("%s%%"%loss) if loss is not None else "não medida",("%.1f ms"%avg) if avg is not None else "não medida","respondeu" if dns_ok else "não confirmado"))
     say("• Link reportado %s Mbps (não é velocidade real da internet)."%(speed if speed is not None else "—"))
     can=sleep!="2"
-    if can: say("  1 Manter Wi-Fi acordado enquanto ligado à energia (reversível)\n  2 Teste estendido\n  3 Aplicar ajuste e testar")
-    else: say("Wi-Fi já fica acordado. 1 = teste estendido.")
+    if can: say("1 Manter Wi-Fi acordado (reversível) | 2 Teste de estabilidade (30 pacotes)")
+    else: say("1 Teste de estabilidade (30 pacotes)")
+    if curl: say("3 Medir download real (~8 MB, via Cloudflare)")
+    if can and curl: say("4 Aplicar ajuste disponível e executar os testes")
     try: choice=input("Escolha (0 para sair): ").strip()
     except EOFError: choice="0"
     actions=[]
-    if can and choice in ("1","3"):
-        j=carregar_journal(); ok,msg=setting_put(adb,j,"global","wifi_sleep_policy","2"); actions.append({"acao":"wifi_sleep_policy=2","resultado":msg if ok else msg}); say(msg if ok else "Não aplicado: "+msg)
-    if choice in (("2","3") if can else ("1",)):
+    if can and choice in ("1","4"):
+        j=carregar_journal(); ok,msg=setting_put(adb,j,"global","wifi_sleep_policy","2")
+        actions.append({"acao":"wifi_sleep_policy=2","resultado":msg if ok else "não aplicado: "+msg}); say(msg if ok else "Não aplicado: "+msg)
+    do_ping=(choice=="2" and can) or (choice=="1" and not can) or choice=="4"
+    do_speed=(choice=="3" and bool(curl)) or (choice=="4" and bool(curl))
+    if do_ping:
         ext=adb.shell("ping -c 30 -W 2 1.1.1.1 2>/dev/null",75)
         m=re.search(r"(\d+(?:\.\d+)?)% packet loss",ext); pl=float(m.group(1)) if m else None
         m=re.search(r"= [\d.]+/[\d.]+/([\d.]+)/",ext); av=float(m.group(1)) if m else None
-        actions.append({"acao":"ping_30_pacotes","perda_pct":pl,"latencia_media_ms":av,"saida":ext[-1500:]}); say("Teste estendido concluído.")
-    data={"veredito":verdict,"interface":iface,"banda":band,"rssi_dbm":rssi,"frequencia_mhz":freq,"link_speed_mbps":speed,"perda_pct":loss,"latencia_media_ms":avg,"dns_ok":dns_ok,"wifi_sleep_policy_antes":sleep,"root":root,"acoes":actions,"ping_bruto":ping[-2200:],"dns_bruto":dns[-700:]}
+        actions.append({"acao":"ping_30_pacotes","perda_pct":pl,"latencia_media_ms":av,"saida":ext[-1500:]})
+        say("Teste estendido: perda %s | média %s"%(("%s%%"%pl) if pl is not None else "não medida",("%.1f ms"%av) if av is not None else "não medida"))
+    if do_speed:
+        out=adb.shell("curl -L -sS --max-time 30 -o /dev/null -w 'SPEEDTV:%{speed_download}' 'https://speed.cloudflare.com/__down?bytes=8000000' 2>&1",40)
+        m=re.search(r"SPEEDTV:([\d.]+)",out); mbps=float(m.group(1))*8/1000000 if m else None
+        actions.append({"acao":"download_8MB","velocidade_mbps":mbps,"saida":out[-600:]})
+        say("Download real: %.2f Mbps"%mbps if mbps is not None else "Teste de download indisponível (servidor, TLS ou conexão recusou).")
+    data={"veredito":verdict,"interface":iface,"banda":band,"rssi_dbm":rssi,"frequencia_mhz":freq,"link_speed_mbps":speed,"perda_pct":loss,"latencia_media_ms":avg,"dns_ok":dns_ok,"wifi_sleep_policy_antes":sleep,"root":root,"curl_disponivel":bool(curl),"acoes":actions,"ping_bruto":ping[-2200:],"dns_bruto":dns[-700:]}
     registrar_relatorio_operacional("Rede IPTV",verdict,data)
 
 
