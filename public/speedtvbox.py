@@ -3670,12 +3670,28 @@ def instalar_launcher(adb, escolha):
 def abrir_ou_instalar_downloader(adb):
     conectar_ou_explicar(adb)
     pacote = "com.esaba.downloader"
+    loja = "com.android.vending"
     if adb.existe(pacote) and adb.enabled_code(pacote) in (0, 1, None):
         say("Downloader já está instalado. Abrindo…")
         say(adb.shell("monkey -p %s 1" % pacote, 20))
         return
-    say("O Downloader é distribuído pelo Google Play. Vou abrir a página oficial da loja.")
-    say("Na TV, selecione Instalar. O agente não baixa cópias de APK de sites terceiros.")
+    if not adb.existe(loja):
+        say("Esta TV Box não tem a Play Store instalada.")
+        say("O Downloader só tem distribuição oficial confirmada pela loja. Não vou instalar APK de espelho.")
+        say("Se quiser, instale pela Play Store em outro método confiável e volte aqui.")
+        return
+    estado_loja = adb.enabled_code(loja)
+    temporaria = estado_loja in (2, 3, 4)
+    if temporaria:
+        say("A Play Store está desativada neste aparelho.")
+        if not perguntar("Ativar a loja temporariamente para instalar o Downloader?", True):
+            say("Não alterei a Play Store.")
+            return
+        saida = adb.shell("pm enable --user %s %s" % (adb.user, loja), 20)
+        if "new state: enabled" not in saida.lower() and adb.enabled_code(loja) not in (0, 1):
+            say("Não consegui reativar a Play Store: %s" % saida[:250])
+            return
+    say("Abrindo a página oficial do Downloader by AFTVnews no Google Play.")
     saida = adb.shell(
         "am start -a android.intent.action.VIEW "
         "-d 'market://details?id=com.esaba.downloader'", 25
@@ -3686,7 +3702,23 @@ def abrir_ou_instalar_downloader(adb):
             "-d 'https://play.google.com/store/apps/details?id=com.esaba.downloader'", 25
         )
     say(saida or "Página da loja solicitada na TV Box.")
-    say("Depois da instalação, volte aqui e escolha Downloader novamente para abrir.")
+    say("Na TV, toque em Instalar. Depois volte ao Termux e pressione Enter.")
+    try:
+        input("Pressione Enter quando terminar na TV…")
+    except EOFError:
+        pass
+    instalado = adb.existe(pacote)
+    say("Downloader instalado e confirmado." if instalado else "Ainda não encontrei o Downloader instalado.")
+    if temporaria:
+        restaurar = {
+            2: "pm disable --user %s %s" % (adb.user, loja),
+            3: "pm disable-user --user %s %s" % (adb.user, loja),
+            4: "pm disable-until-used --user %s %s" % (adb.user, loja),
+        }.get(estado_loja)
+        if restaurar:
+            adb.shell(restaurar, 20)
+            say("Play Store voltou ao estado anterior (desativada).")
+
 
 
 def menu_instalacoes(adb):
