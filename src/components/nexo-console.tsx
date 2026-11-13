@@ -22,7 +22,7 @@ const ONDAS = [
     n: "02",
     nome: "Perguntar",
     texto:
-      "Se achar XCPE ou Adups, pergunta se desativa. Se achar Netflix, Kodi, Prime ou Disney de fábrica, pergunta de novo. YouTube da TV fica.",
+      "Registra indicadores conhecidos de XCPE e pacotes de atualização que merecem revisão. A confirmação é feita antes da onda de limpeza; Adups/OTA, sozinho, não prova infecção. Apps de streaming de fábrica são avaliados separadamente. YouTube da TV fica.",
   },
   {
     n: "03",
@@ -40,9 +40,9 @@ const ONDAS = [
 
 const MEDIDAS = [
   ["RAM", "meminfo, mapa iomem e dumpsys. Se a prop disser 4 GB e o kernel mostrar menos, o relatório marca vitrine."],
-  ["Android", "SDK, release e kernel. Android 14 em kernel 4.4 é mentira de firmware, não é patch velho."],
-  ["Widevine", "Lê o nível. L1 de TV Box genérica é vitrine até um filme protegido tocar. Não existe atalho para 4K."],
-  ["Ameaça", "Adups, OTA silenciosa e o backdoor XCPE (com.oemservice / x.cpe), que aluga o IP da casa e volta da partição /oem."],
+  ["Android", "Cruza SDK, versão declarada e kernel. Uma discrepância forte é um alerta para investigar, não prova isolada de firmware falso."],
+  ["Widevine", "Lê o nível DRM. L1 não garante certificação do aplicativo, liberação de HD/4K nem compatibilidade do serviço; isso depende também do provedor e do dispositivo."],
+  ["Ameaça", "Procura indicadores publicados do XCPE, como x.cpe, com.oemservice, com.abc.nexus e droppers conhecidos. Adups/OTA pode ser componente legítimo ou suspeito conforme a variante; o nome sozinho não confirma infecção. A auditoria não é um antivírus completo."],
   ["Play", "O que está desativado, escondido ou removido só para o usuário, inclusive WebView e Trichrome."],
   ["Termux", "O relatório vai para Download/SpeedTV, a pasta que abre no app Arquivos."],
 ];
@@ -178,7 +178,7 @@ python speedtvbox.py`}</pre>
             <span className="text-fg">Lê, sem desativar.</span> RAM verdadeira contra a da etiqueta, Android da tela Sobre contra o kernel, armazenamento, processos, Widevine, pacotes, apps de inicialização e indicadores conhecidos de ameaça.
           </li>
           <li>
-            <span className="text-fg">Pergunta do risco.</span> Adups e o backdoor XCPE (com.oemservice) são desativados se você disser sim. Não são apagados: a firmware reporia o arquivo.
+            <span className="text-fg">Indicadores de segurança.</span> O agente registra nomes associados ao XCPE e pacotes de atualização que merecem revisão. A aplicação das ondas depende da sua confirmação. Desativar um pacote não remove uma cópia que esteja embutida no firmware.
           </li>
           <li>
             <span className="text-fg">Pergunta do que veio de fábrica.</span> Netflix, Kodi, Prime, Disney, Globoplay. YouTube da TV fica. Play Store, GMS, WebView, launcher, teclado, HDMI e codec não entram.
@@ -568,6 +568,7 @@ export function Console() {
 
       <section className="mt-10">
         <h2 className="font-display text-3xl">O que a auditoria olha</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">Os indicadores XCPE seguem a análise pública do Google Threat Intelligence. Encontrar um nome é um sinal para investigar; não encontrar os nomes listados também não garante que o firmware esteja limpo. <a className="underline text-fg" href="https://cloud.google.com/blog/topics/threat-intelligence/shutting-the-door-on-the-xcpe-botnet" target="_blank" rel="noreferrer">Ler o relatório técnico do Google</a>.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {MEDIDAS.map(([nome, texto]) => (
             <article key={nome} className="rounded-xl border border-line bg-bg-raised p-4">
