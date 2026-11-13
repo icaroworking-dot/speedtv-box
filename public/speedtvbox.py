@@ -3,8 +3,11 @@
 """
 SpeedTV Box — agente de TV Box, pensado para o Termux no celular.
 
-    cp /sdcard/Download/speedtvbox.py $HOME/
-    cd $HOME
+No Termux, cole este bloco inteiro (ele acha o arquivo na pasta Download):
+
+    f=$(find "$HOME/storage/downloads" "$HOME/storage/shared/Download" "$HOME/storage/shared/Downloads" -iname 'speedtvbox.py*' 2>/dev/null | head -n 1)
+    cp "$f" "$HOME/speedtvbox.py"
+    cd "$HOME"
     python speedtvbox.py
 
 Na primeira vez, escolha 1. O agente lê, limpa e grava o relatório.

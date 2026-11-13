@@ -54,6 +54,12 @@ const COMANDOS = [
   ["python speedtvbox.py reverter", "desfaz o que o SpeedTV Box mudou"],
 ];
 
+const BLOCO_TERMUX = `f=$(find "$HOME/storage/downloads" "$HOME/storage/shared/Download" "$HOME/storage/shared/Downloads" -iname 'speedtvbox.py*' 2>/dev/null | head -n 1)
+echo "Achei: \${f:-nada}"
+cp "$f" "$HOME/speedtvbox.py"
+cd "$HOME"
+python speedtvbox.py`;
+
 const PASSOS = [
   {
     n: "01",
@@ -138,12 +144,9 @@ function Tutorial() {
       <section className="grid gap-4 lg:grid-cols-2">
         <article className="rounded-2xl border border-line bg-surface p-5">
           <h3 className="font-display text-2xl text-fg">No Termux</h3>
-          <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-fg">{`termux-setup-storage
-cp /sdcard/Download/speedtvbox.py $HOME/
-cd $HOME
-python speedtvbox.py`}</pre>
+          <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-fg">{BLOCO_TERMUX}</pre>
           <p className="mt-3 text-sm leading-relaxed text-muted">
-            Se o arquivo não estiver dentro de Download, use <span className="font-mono text-fg">cp /sdcard/speedtvbox.py $HOME/</span>. Não escreva um til com barra. Na TV, aceite a depuração.
+            Cole o bloco inteiro de uma vez. O Termux aceita várias linhas juntas. Ele mesmo acha o arquivo na pasta Download do celular. Se aparecer Achei: nada, o download não caiu nessa pasta.
           </p>
         </article>
         <article className="rounded-2xl border border-line bg-surface p-5">
@@ -398,20 +401,20 @@ export function Console() {
 
         <aside className="rounded-2xl border border-line bg-bg-raised p-5">
           <p className="font-display text-2xl text-fg">No Termux</p>
-          <ol className="mt-3 space-y-3 text-sm text-muted">
-            <li>
-              <span className="text-fg">1.</span> Baixe o .py. Celular e caixa no mesmo Wi-Fi.
-            </li>
-            <li>
-              <span className="font-mono text-xs text-fg">cp /sdcard/Download/speedtvbox.py $HOME/</span>
-            </li>
-            <li>
-              <span className="font-mono text-xs text-fg">cd $HOME && python speedtvbox.py</span>
-            </li>
-            <li>
-              <span className="text-fg">2.</span> Na primeira vez, escolha 1. O passo a passo do reset está na aba Tutorial.
-            </li>
-          </ol>
+          <p className="mt-3 text-sm text-muted">Baixe o .py. Cole isto inteiro, de uma vez:</p>
+          <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-fg">{BLOCO_TERMUX}</pre>
+          <button
+            type="button"
+            className="mt-3 inline-flex min-h-11 items-center rounded-xl border border-line px-4 text-sm text-fg"
+            onClick={() => {
+              navigator.clipboard.writeText(BLOCO_TERMUX).then(() => {
+                setAviso("Comandos copiados. No Termux, segure a tela e cole tudo de uma vez.");
+              });
+            }}
+          >
+            Copiar comandos
+          </button>
+          <p className="mt-3 text-sm text-muted">Na primeira vez, escolha 1. O reset está na aba Tutorial.</p>
         </aside>
       </section>
 
@@ -511,7 +514,7 @@ export function Console() {
         </div>
         <p className="mt-3 flex items-start gap-2 text-sm text-muted">
           <RotateCcw className="mt-0.5 size-4 shrink-0 text-faint" aria-hidden="true" />
-          No Termux use <span className="font-mono text-fg">$HOME</span>, nunca um til com barra. Se o arquivo baixado estiver na raiz da memória, e não dentro de Download, tire o <span className="font-mono text-fg">Download/</span> do comando. A Aquaris e a MXQ entram pelo mesmo fluxo.
+          Cole o bloco do Termux inteiro. Não use /sdcard: no Termux essa pasta não existe. O bloco procura o arquivo em Download sozinho.
         </p>
       </section>
 
