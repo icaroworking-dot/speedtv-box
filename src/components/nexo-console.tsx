@@ -304,7 +304,7 @@ export function Console() {
           <h1 className="font-display text-5xl leading-none text-fg sm:text-6xl">SpeedTV Box</h1>
         </div>
         <p className="max-w-xs text-sm text-muted">
-          Versão 6. Escolha 1. O relatório vai para Download/SpeedTV.
+          Versão 7. A memória usável soma o que está livre com o cache. O relatório e a sessão ficam em Download/SpeedTV.
         </p>
       </header>
 

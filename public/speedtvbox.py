@@ -11,7 +11,7 @@ No Termux, cole este bloco inteiro (ele acha o arquivo na pasta Download):
     python speedtvbox.py
 
 Na primeira vez, escolha 1. O agente lê, limpa e grava o relatório.
-O celular e a caixa na mesma rede. Nada é apagado do /system: o
+O celular e a TV Box na mesma rede. Nada é apagado do /system: o
 debloat usa `pm disable-user`, reversível com a opção Desfazer ou com
 o reset físico. A chave e o IP são gravados pela página na hora do download.
 SPEEDTV_API_KEY e SPEEDTV_DEVICE substituem esses valores se existirem.
@@ -35,7 +35,7 @@ DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "6"
+VERSAO = "7"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -282,7 +282,7 @@ WAVE3 = [
 ]
 
 # Apps que a fábrica enfia e não são codec, loja nem launcher.
-# A primeira vez pergunta. YouTube da TV fica de fora: muita caixa só tem ele.
+# A primeira vez pergunta. YouTube da TV fica de fora: muita TV Box só tem ele.
 LIXO_FABRICA = (
     ("org.xbmc.kodi", "Kodi"),
     ("com.netflix.ninja", "Netflix"),
@@ -428,8 +428,34 @@ def setup_stdio():
             pass
 
 
+_SESSAO = None
+
+
+def iniciar_sessao():
+    global _SESSAO
+    if _SESSAO:
+        return _SESSAO
+    try:
+        pasta = pasta_visivel() or garantir_dados()
+    except Exception:
+        return None
+    _SESSAO = pasta / ("sessao_%s.txt" % datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    try:
+        _SESSAO.write_text("SpeedTV Box — sessão completa\n", encoding="utf-8")
+    except Exception:
+        _SESSAO = None
+    return _SESSAO
+
+
 def say(msg=""):
     print(msg, flush=True)
+    if not _SESSAO:
+        return
+    try:
+        with _SESSAO.open("a", encoding="utf-8") as fh:
+            fh.write((msg or "") + "\n")
+    except Exception:
+        pass
 
 
 def titulo(texto):
@@ -437,6 +463,17 @@ def titulo(texto):
     say("─" * 62)
     say(texto)
     say("─" * 62)
+
+
+def ram_usavel_kb(mem):
+    """No kernel 3.10 não existe MemAvailable. Livre + cache é o que dá para usar."""
+    if not mem:
+        return None
+    if mem.get("MemAvailable"):
+        return mem["MemAvailable"]
+    if mem.get("MemFree") is None and not mem.get("Cached") and not mem.get("Buffers"):
+        return None
+    return (mem.get("MemFree") or 0) + (mem.get("Cached") or 0) + (mem.get("Buffers") or 0)
 
 
 def kb_mb(kb):
@@ -787,7 +824,7 @@ def parse_widevine(text):
         return "sem resposta do DRM"
     low = text.lower()
     if "widevine" not in low and "level" not in low:
-        return "Widevine não apareceu no dumpsys. Caixa sem certificação, ou o serviço de DRM não respondeu."
+        return "Widevine não apareceu no dumpsys. TV Box sem certificação, ou o serviço de DRM não respondeu."
     nivel = None
     for token in ("L1", "L2", "L3", "level1", "level3", "HW_SECURE_ALL", "HW_SECURE_DECODE", "SW_SECURE_CRYPTO"):
         if token.lower() in low or token in text:
@@ -804,7 +841,7 @@ def parse_widevine(text):
     if nivel == "L3":
         return (
             "Widevine L3 (software). Catálogo protegido fica em SD. "
-            "Isto é o nível honesto de quase toda caixa genérica."
+            "Isto é o nível honesto de quase toda TV Box genérica."
         )
     return "Widevine presente, nível não identificado no texto. Trecho salvo no relatório."
 
@@ -1046,8 +1083,9 @@ def coletar_metricas(adb, etiqueta):
         "quando": agora_iso(),
         "etiqueta": etiqueta,
         "mem_total_kb": mem.get("MemTotal"),
-        "mem_available_kb": mem.get("MemAvailable") or mem.get("MemFree"),
+        "mem_available_kb": ram_usavel_kb(mem),
         "mem_free_kb": mem.get("MemFree"),
+        "mem_cache_kb": (mem.get("Cached") or 0) + (mem.get("Buffers") or 0),
         "swap_total_kb": mem.get("SwapTotal"),
         "swap_free_kb": mem.get("SwapFree"),
         "zram_kb": mem.get("Zram") or mem.get("SwapCached"),
@@ -1061,9 +1099,10 @@ def coletar_metricas(adb, etiqueta):
 
 
 def linha_metrica(m):
-    return "%s | RAM livre %s | processos %s | desativados %s | /data %s" % (
+    return "%s | usável %s | sem uso %s | processos %s | desligados %s | /data %s" % (
         m.get("etiqueta"),
         kb_mb(m.get("mem_available_kb")),
+        kb_mb(m.get("mem_free_kb")),
         m.get("processos"),
         m.get("desativados"),
         kb_mb(m.get("data_livre_kb")),
@@ -1159,7 +1198,7 @@ def frases_relatorio(r):
     w = r.get("widevine") or ""
     if w.startswith("Widevine L1"):
         frases.append(
-            "O DRM respondeu L1. Em caixa genérica isso só vale se um app protegido tocar em HD. "
+            "O DRM respondeu L1. Em TV Box genérica isso só vale se um app protegido tocar em HD. "
             "Tela preta: a opção Widevine esconde a biblioteca falsa e assume L3 de verdade, em SD."
         )
     elif "L3" in w:
@@ -1433,6 +1472,7 @@ def auditar(adb, falar=True):
         "ram_dmesg_mb": dmesg_mb,
         "ram_dumpsys_mb": total_ram_dump,
         "ram_disponivel_kb": mem.get("MemAvailable") or mem.get("MemFree"),
+        "ram_usavel_kb": ram_usavel_kb(mem),
         "ram_livre_kb": mem.get("MemFree"),
         "anuncios_ram": anuncios,
         "ram_mentira": mentira_ram,
@@ -1586,6 +1626,28 @@ def setting_put(adb, journal, ns, chave, valor):
     return True, "de %s para %s" % (antigo or "vazio", valor)
 
 
+# Não entra na limpeza funda. Codec, rede e a tela inicial.
+KEEP_FUNDO = (
+    "codec", "extractor", "omx", "stagefright", "keystore", "widevine",
+    "hdmi", "cec", "tvinput", "launcher", "webview", "trichrome",
+    "bluetooth", "wifi", "ethernet", "drm",
+)
+
+
+def candidatos_profundos(nomes, gate):
+    fora = []
+    for nome in sorted(nomes or []):
+        if not validar_pacote(nome):
+            continue
+        if gate and gate.motivo(nome):
+            continue
+        low = nome.lower()
+        if any(bit in low for bit in KEEP_FUNDO):
+            continue
+        fora.append(nome)
+    return fora
+
+
 def desativar(adb, gate, journal, pacotes, onda):
     mudou = []
     pulou = []
@@ -1620,6 +1682,11 @@ def desativar(adb, gate, journal, pacotes, onda):
             salvar_journal(journal)
             escrever_rollback(adb.serial, adb.binary, journal["disabled"])
             say("  desativado  %s" % pkg)
+            saiu = adb.shell("pm uninstall --user %s %s" % (adb.user, pkg), 20)
+            if "Success" in saiu:
+                journal.setdefault("removidos", []).append(pkg)
+                salvar_journal(journal)
+                say("  removido para o usuário  %s (volta com Desfazer)" % pkg)
         else:
             pulou.append((pkg, (out or "sem confirmação").strip().splitlines()[-1][:160]))
     journal.setdefault("ondas", []).append({
@@ -1644,7 +1711,8 @@ def reativar(adb, pacotes):
     for pkg in pacotes:
         if not validar_pacote(pkg):
             continue
-        adb.shell("pm enable %s" % pkg, 18)
+        adb.shell("pm install-existing --user %s %s" % (adb.user, pkg), 18)
+        adb.shell("pm enable --user %s %s" % (adb.user, pkg), 18)
         adb.shell("pm unhide --user %s %s" % (adb.user, pkg), 15)
         adb.shell("pm unsuspend --user %s %s" % (adb.user, pkg), 15)
         feitos.append(pkg)
@@ -1681,7 +1749,7 @@ def saudavel(adb, home_antes, vending_antes, gms_antes):
 
 
 def reiniciar_esperar(adb):
-    say("Reiniciando a caixa. A TV vai apagar. Não desligue da tomada.")
+    say("Reiniciando a TV Box. A TV vai apagar. Não desligue da tomada.")
     adb._exec(["-s", adb.serial, "reboot"], 20)
     time.sleep(12)
     limite = time.time() + 210
@@ -1699,8 +1767,8 @@ def reiniciar_esperar(adb):
         except Exception:
             pass
         falta = int(limite - time.time())
-        say("  esperando a caixa voltar no ADB… %ss" % max(falta, 0))
-        time.sleep(4)
+        say("  esperando a TV Box voltar… %ss" % max(falta, 0))
+        time.sleep(12)
     return False
 
 
@@ -1715,7 +1783,7 @@ def ajustar_video(adb, journal, ram_mb, forcar=False):
     if max(pw, ph) < 2000:
         return "a tela física já é %dx%d. Não forcei 1080 por cima de uma saída menor." % (pw, ph)
     if not forcar and (ram_mb is None or ram_mb >= 1536):
-        return "RAM real %s MB — não travei a resolução. 1080p forçado é só para caixa fraca." % (ram_mb or "?")
+        return "RAM real %s MB — não travei a resolução. 1080p forçado é só para TV Box fraca." % (ram_mb or "?")
     if override and override.group(2) == "1080":
         return "já existe override 1080p."
     journal.setdefault("wm", {})
@@ -1758,7 +1826,7 @@ def onda_ajustes(adb, journal, ram_mb, video=True):
 
 def executar_ondas(adb, sim=False, sem_onda3=False):
     titulo("Debloat em ondas")
-    say("Cada onda desativa, reinicia, mede de novo e só continua se a caixa voltar.")
+    say("Cada onda desativa, reinicia, mede de novo e só continua se a TV Box voltar.")
     say("Launcher, Play Store, GMS, WebView, teclado, HDMI e SystemUI estão fora.")
     say("YouTube da TV fica. Netflix, Kodi e o resto de fábrica só saem se você")
     say("confirmou na opção 1. Calendário, mapa e telefone podem sair: não são codec.")
@@ -1814,9 +1882,17 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
     plano = [(1, o1), (2, o2)]
     if fazer3:
         plano.append((3, o3))
+    fundo = [p for p in candidatos_profundos(sistema, gate) if p not in set(o1 + o2 + o3)]
+    if fundo and perguntar(
+        "Tem mais %d aplicativos que não são loja, vídeo nem tela inicial. Tirar em grupos de 12?" % len(fundo),
+        True,
+        True if sim else None,
+    ):
+        for i in range(0, len(fundo), 12):
+            plano.append(("extra %d" % (i // 12 + 1), fundo[i:i + 12]))
 
     for numero, lista in plano:
-        titulo("Onda %d" % numero)
+        titulo("Onda %s" % numero)
         if not lista:
             say("Nada desta onda está instalado. Seguindo.")
             continue
@@ -1824,7 +1900,7 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
             mudou, pulou = desativar(adb, gate, journal, lista, numero)
         except DeviceOffline as exc:
             say("Perdi o ADB no meio da onda: %s" % exc)
-            say("Quando a caixa voltar: python speedtvbox.py reverter")
+            say("Quando a TV Box voltar: python speedtvbox.py reverter")
             return
         say("Desativados nesta onda: %d. Recusas do portão: %d." % (len(mudou), len(pulou)))
         if not mudou:
@@ -1832,7 +1908,7 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
             continue
         if not reiniciar_esperar(adb):
             say("")
-            say("A caixa não voltou em cerca de 3 minutos.")
+            say("A TV Box não voltou em cerca de 3 minutos.")
             say("Tire da tomada por 30 segundos e ligue de novo.")
             say("Se o ADB voltar, rode:  python speedtvbox.py reverter")
             say("Se não voltar, o reset físico desfaz: nada foi apagado do /system,")
@@ -1903,7 +1979,7 @@ def reverter(adb, sim=False):
     if journal.get("wm", {}).get("size_set"):
         adb.shell("wm size reset", 12)
         adb.shell("wm density reset", 12)
-        say("  resolução e densidade voltaram ao padrão da caixa.")
+        say("  resolução e densidade voltaram ao padrão da TV Box.")
     if tem_oem:
         say(restaurar_oem(adb, tem_root(adb), journal))
     if scripts:
@@ -1994,7 +2070,7 @@ def ajustar_rede(adb, sim=False):
     onda_ajustes(adb, journal, ram_mb=99999, video=False)
     modo = setting_get(adb, "global", "captive_portal_mode")
     say("Portal cativo (captive_portal_mode) está '%s'." % (modo or "padrão"))
-    say("Em caixa chinesa isso às vezes marca a rede como 'sem internet' mesmo com internet.")
+    say("Em TV Box chinesa isso às vezes marca a rede como 'sem internet' mesmo com internet.")
     if perguntar("Desligar a checagem de portal cativo?", False, False if sim else None):
         ok, msg = setting_put(adb, journal, "global", "captive_portal_mode", "0")
         say(msg if ok else "não apliquei: " + msg)
@@ -2373,7 +2449,7 @@ def playstore(adb, sim=False):
 
     say("")
     say("8) Reinício e teste de novo. Várias falhas de GMS só assentam depois do boot.")
-    if perguntar("Reiniciar a caixa agora?", True, True if sim else None):
+    if perguntar("Reiniciar a TV Box agora?", True, True if sim else None):
         if reiniciar_esperar(adb):
             tenta = iniciar_pacote(adb, "com.android.vending")
             if tenta.get("aberto") and not tenta.get("fatal"):
@@ -2417,7 +2493,7 @@ def imprimir_resto_play(tenta):
     say("")
     say("O que ainda vale testar na mão, se este fluxo não bastou:")
     say("  • Confirme conta Google em Configurações. Sem conta a loja abre na tela de login, não 'não abre'.")
-    say("  • Caixa sem certificação Google (a maioria das MXQ) nunca atualiza GMS direito.")
+    say("  • TV Box sem certificação Google (a maioria das MXQ) nunca atualiza GMS direito.")
     say("  • Último recurso, e desloga a conta: pm clear com.google.android.gms")
     say("    O SpeedTV Box não faz isso sozinho.")
 
@@ -2595,7 +2671,7 @@ def gemini_play(contexto):
 
 
 def perguntar_gemini(adb, pergunta):
-    titulo("Gemini com o contexto desta caixa")
+    titulo("Gemini com o contexto desta TV Box")
     conectar_ou_explicar(adb)
     rel_path = garantir_dados() / "auditoria-ultima.json"
     if rel_path.is_file():
@@ -2636,7 +2712,7 @@ def conectar_ou_explicar(adb):
     except Exception:
         sdk = ""
     say("")
-    say("Não entrei. Na caixa: Configurações → Sobre → clicar 7 vezes em Compilação,")
+    say("Não entrei. Na TV Box: Configurações → Sobre → clicar 7 vezes em Compilação,")
     say("depois Opções do desenvolvedor → Depuração USB. Em Android 11 ou mais novo")
     say("também existe 'Depuração sem fio': parear com código e só então a porta 5555 abre.")
     if perguntar("Tentar parear agora (código na tela da TV)?", False, False):
@@ -2858,13 +2934,13 @@ def restaurar_oem(adb, root, journal):
     salvar_journal(journal)
     if ainda:
         return "algumas bibliotecas continuam escondidas."
-    return "biblioteca OEM de volta. O L1 da caixa, verdadeiro ou falso, volta depois do reboot."
+    return "biblioteca OEM de volta. O L1 da TV Box, verdadeiro ou falso, volta depois do reboot."
 
 
 def widevine(adb, sim=False):
     titulo("Widevine")
     say("Não existe jeito honesto de transformar L3 em L1. Quem promete 4K")
-    say("numa caixa genérica está mentindo o certificado.")
+    say("numa TV Box genérica está mentindo o certificado.")
     say("O que dá para fazer: se o L1 é falso, a biblioteca OEM quebra o app")
     say("(tela preta). Esconder liboemcrypto.so faz o Android usar o Widevine")
     say("de software e assumir L3 de verdade. Netflix e similares tocam em SD.")
@@ -2874,7 +2950,7 @@ def widevine(adb, sim=False):
     say("")
     say(rel.get("widevine") or "sem leitura")
     if rel.get("widevine", "").startswith("Widevine L1"):
-        say("Se esta caixa é Aquaris, MXQ ou outra genérica, trate L1 como vitrine")
+        say("Se esta TV Box é Aquaris, MXQ ou outra genérica, trate L1 como vitrine")
         say("até um app protegido tocar de verdade.")
     paths = listar_oemcrypto(adb)
     say("")
@@ -2923,7 +2999,7 @@ def seguranca(adb, sim=False):
     say("um milhão de TV boxes. O pacote é com.oemservice (às vezes x.cpe).")
     say("Ele volta da partição /oem se for apagado. disable-user impede o")
     say("boot de subir o serviço. Isto não é antivírus e não limpa a firmware.")
-    say("Se o pacote estiver ativo, tire a caixa da internet até desativar.")
+    say("Se o pacote estiver ativo, tire a TV Box da internet até desativar.")
     conectar_ou_explicar(adb)
     rel = auditar(adb, falar=False)
     ruins = nomes_de_risco(rel)
@@ -2946,7 +3022,7 @@ def seguranca(adb, sim=False):
         journal = carregar_journal()
         desativar(adb, gate, journal, ruins, "virus")
         say("Se com.oemservice estava na lista, reinicie e rode o diagnóstico de novo.")
-        say("Se ele voltar ligado sozinho, a firmware reinstala. Aí a caixa não é confiável na sua rede.")
+        say("Se ele voltar ligado sozinho, a firmware reinstala. Aí a TV Box não é confiável na sua rede.")
     if verifier != "1" and perguntar("Ligar o verificador de apps da Play Store?", True, True if sim else None):
         journal = carregar_journal()
         ok, msg = setting_put(adb, journal, "global", "package_verifier_enable", "1")
@@ -2973,7 +3049,7 @@ def diagnostico(adb):
 
 def afinar(adb, sim=False):
     titulo("Afinar")
-    say("Junta o que antes estava espalhado: cache, caixa ligada na tomada,")
+    say("Junta o que antes estava espalhado: cache, TV Box ligada na tomada,")
     say("DNS, Wi-Fi sem dormir, ZRAM se houver root, e 1080p se a RAM for baixa.")
     say("Não desativa aplicativo. Reverter desfaz os ajustes.")
     conectar_ou_explicar(adb)
@@ -3020,8 +3096,11 @@ def linha_ram(r):
     real = r.get("ram_real_mb")
     livre = kb_mb(r.get("ram_disponivel_kb"))
     fonte = r.get("ram_fonte") or "meminfo"
-    base = "RAM de verdade: %s, lida em %s. Livre agora: %s." % (
-        ("%d MB" % real) if real else "não medida", fonte, livre,
+    base = "RAM de verdade: %s, lida em %s. Sem uso: %s. Usável (sem uso + cache): %s." % (
+        ("%d MB" % real) if real else "não medida",
+        fonte,
+        livre,
+        kb_mb(r.get("ram_usavel_kb")),
     )
     if r.get("ram_mentira"):
         vitrine = ", ".join("%s MB" % a["mb"] for a in r["ram_mentira"] if a.get("mb"))
@@ -3216,6 +3295,8 @@ def menu(adb, sim=False, sem_onda3=False):
             say("Relatórios: Download/SpeedTV")
         else:
             say("Relatórios ainda dentro do Termux. Rode: termux-setup-storage")
+        if _SESSAO:
+            say("Esta sessão, inteira: %s" % _SESSAO.name)
         say("")
         say("  1  Começar agora")
         say("  2  Só olhar")
@@ -3296,7 +3377,7 @@ def submenu(adb, sim=False):
     say("  2  Boot, com parecer e o que fazer")
     say("  3  RAM agora")
     say("  4  Abrir um aplicativo e guardar o log")
-    say("  5  Reiniciar a caixa")
+    say("  5  Reiniciar a TV Box")
     say("  0  Voltar")
     try:
         escolha = input("\nOpção: ").strip()
@@ -3384,7 +3465,14 @@ def selftest():
         Gate(),
     )
     assert pesados and pesados[0]["pacote"] == "com.android.calendar"
-    assert parse_zoneinfo_mb("managed  262144\n") == 1024
+    assert ram_usavel_kb({"MemFree": 40000, "Cached": 700000, "Buffers": 10000}) == 750000
+    assert "com.rockchips.mediacenter" in candidatos_profundos(
+        ["com.rockchips.mediacenter", "com.droidlogic.mboxlauncher", "com.android.vending"],
+        Gate(),
+    )
+    assert "com.droidlogic.mboxlauncher" not in candidatos_profundos(
+        ["com.droidlogic.mboxlauncher"], Gate(),
+    )
     data = extrair_json("```json\n{\"diagnostico\": \"webview\", \"acoes\": []}\n```")
     assert data["diagnostico"] == "webview"
     nomes = parse_pm_names("package:com.android.vending\npackage:/system/app/X.apk=com.foo.bar\n")
@@ -3438,6 +3526,7 @@ def main(argv=None):
     if args.selftest or args.comando == "selftest":
         selftest()
         return 0
+    iniciar_sessao()
     binary = find_adb()
     if not binary:
         say("Não achei o adb.")
@@ -3496,7 +3585,7 @@ def main(argv=None):
             texto = " ".join(args.extra).strip() or input("Pergunta: ").strip()
             perguntar_gemini(adb, texto)
     except DeviceOffline as exc:
-        say("A caixa saiu do ADB: %s" % exc)
+        say("A TV Box saiu do ADB: %s" % exc)
         return 3
     except KeyboardInterrupt:
         say("\nInterrompido.")
