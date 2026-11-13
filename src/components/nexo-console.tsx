@@ -63,9 +63,9 @@ python speedtvbox.py`;
 const PASSOS = [
   {
     n: "01",
-    nome: "Reset de fábrica",
+    nome: "Preparar a TV Box",
     texto:
-      "TV Box usada começa pelo recovery. O furinho RESET fica no fundo, em geral ao lado da entrada AV. Segure com um clipe, ligue na tomada e segure uns dez segundos. Wipe cache, depois Wipe data / factory reset, depois Reboot. Se a HDMI ficar preta, use o cabo amarelo de vídeo ou outra porta da TV. O controle quase nunca anda nesse menu: use um teclado USB. O reset apaga conta e aplicativo. Não apaga vírus gravado na firmware.",
+      "Reset de fábrica não é obrigatório para começar e apaga contas e aplicativos. Primeiro faça a auditoria. Só use o recovery se você realmente quiser zerar os dados ou se houver um problema que justifique isso; ele não remove malware gravado na firmware.",
   },
   {
     n: "02",
@@ -92,9 +92,9 @@ function Tutorial() {
     <div className="mt-8 space-y-8">
       <section className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <p className="font-mono text-xs tracking-widest text-amber">PRIMEIRA VEZ</p>
-        <h2 className="mt-2 font-display text-4xl leading-none text-fg">Do reset até o relatório</h2>
+        <h2 className="mt-2 font-display text-4xl leading-none text-fg">Da preparação ao relatório</h2>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-          O uso normal é uma vez por TV Box, depois do reset. Escolha 1. O agente lê, pergunta sim ou não, limpa em ondas e salva o relatório em Download/SpeedTV.
+          Não precisa formatar a TV Box para começar. Escolha 1 para auditar, revisar os riscos e decidir o que será desativado. O relatório vai para Download/SpeedTV quando o Android permitir.
         </p>
       </section>
 
@@ -211,11 +211,15 @@ async function shaCurto(texto: string): Promise<string> {
 function personalizar(texto: string, ip: string, api: string): string {
   let alvo = ip.trim();
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(alvo)) alvo += ":5555";
-  if (!/^(\d{1,3}\.){3}\d{1,3}:\d{2,5}$/.test(alvo)) {
-    throw new Error("IP inválido. Use 192.168.1.88 ou 192.168.1.88:5555");
+  const partes = alvo.split(":");
+  const octetos = partes[0].split(".");
+  const porta = Number(partes[1]);
+  const ipValido = octetos.length === 4 && octetos.every((parte) => /^\d{1,3}$/.test(parte) && Number(parte) >= 0 && Number(parte) <= 255);
+  if (!ipValido || partes.length !== 2 || !Number.isInteger(porta) || porta < 1 || porta > 65535) {
+    throw new Error("IP inválido. Use um IPv4 válido, com porta opcional (ex.: 192.168.1.88:5555).");
   }
   const chave = api.trim();
-  if (chave.length < 10 || /[\r\n"']/.test(chave)) {
+  if (!/^[A-Za-z0-9_-]{20,256}$/.test(chave)) {
     throw new Error("Cole a chave do Gemini, numa linha só.");
   }
   const comIp = texto.replace(/DISPOSITIVO_PADRAO = "[^"]*"/, `DISPOSITIVO_PADRAO = "${alvo}"`);
@@ -233,7 +237,7 @@ function baixar(texto: string, nome: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 export function Console() {
@@ -243,6 +247,7 @@ export function Console() {
   const [hash, setHash] = useState("");
   const [ip, setIp] = useState("192.168.1.88:5555");
   const [api, setApi] = useState("");
+  const [lembrarChave, setLembrarChave] = useState(false);
   const [aba, setAba] = useState<"baixar" | "tutorial">("baixar");
 
   useEffect(() => {
@@ -250,7 +255,10 @@ export function Console() {
     const ipSalvo = localStorage.getItem("speedtv-ip") || localStorage.getItem("nexo-ip");
     const apiSalva = localStorage.getItem("speedtv-api") || localStorage.getItem("nexo-api");
     if (ipSalvo) setIp(ipSalvo);
-    if (apiSalva) setApi(apiSalva);
+    if (apiSalva) {
+      setApi(apiSalva);
+      setLembrarChave(true);
+    }
     lerAgente()
       .then(async (texto) => {
         if (!vivo) return;
@@ -278,7 +286,12 @@ export function Console() {
       try {
         const pronto = personalizar(bruto, ip, api);
         localStorage.setItem("speedtv-ip", ip.trim());
-        localStorage.setItem("speedtv-api", api.trim());
+        if (lembrarChave) {
+          localStorage.setItem("speedtv-api", api.trim());
+        } else {
+          localStorage.removeItem("speedtv-api");
+          localStorage.removeItem("nexo-api");
+        }
         fn(pronto);
       } catch (erro) {
         setAviso(erro instanceof Error ? erro.message : "Não deu para montar o arquivo.");
@@ -304,7 +317,7 @@ export function Console() {
           <h1 className="font-display text-5xl leading-none text-fg sm:text-6xl">SpeedTV Box</h1>
         </div>
         <p className="max-w-xs text-sm text-muted">
-          Versão 7. A memória usável soma o que está livre com o cache. O relatório e a sessão ficam em Download/SpeedTV.
+          Versão 8. A memória disponível considera MemAvailable ou livre + cache nos kernels antigos. O relatório e a sessão ficam em Download/SpeedTV.
         </p>
       </header>
 
@@ -351,6 +364,7 @@ export function Console() {
             Chave do Gemini
             <input
               id="nexo-api"
+              type="password"
               placeholder="cole a chave do Gemini"
               value={api}
               onChange={(e) => setApi(e.target.value)}
@@ -360,8 +374,12 @@ export function Console() {
               className="mt-1 w-full rounded-xl border border-line bg-bg-raised px-3 py-3 font-mono text-sm text-fg"
             />
           </label>
+          <label className="mt-3 flex items-center gap-2 text-sm text-muted">
+            <input type="checkbox" checked={lembrarChave} onChange={(e) => setLembrarChave(e.target.checked)} />
+            Lembrar a chave neste navegador
+          </label>
           <p className="mt-2 text-sm text-muted">
-            O download já sai com esses dois gravados. No Termux não precisa colar nada.
+            O .py baixado já sai com IP e chave gravados. Se não marcar a opção acima, a chave não fica salva no navegador, mas continua dentro do arquivo que você baixar.
           </p>
           <div className="mt-5 flex flex-col gap-2 sm:flex-row">
             <button
@@ -532,7 +550,7 @@ export function Console() {
           </pre>
         ) : null}
         <p className="mt-4 text-xs leading-relaxed text-faint">
-          A página não guarda a chave. Ela entra só no arquivo que você baixa, no seu celular. Não suba esse arquivo baixado num GitHub público.
+          A chave nunca é gravada no repositório. Ela entra no arquivo que você baixa; marque “Lembrar a chave” apenas se quiser mantê-la no armazenamento local deste navegador. Não publique o .py personalizado.
         </p>
       </section>
         </>
