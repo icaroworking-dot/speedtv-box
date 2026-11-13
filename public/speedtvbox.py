@@ -1329,7 +1329,8 @@ def auditar(adb, falar=True):
     if falar:
         titulo("Auditoria forense — só leitura")
         say("Nada é desativado nesta etapa.")
-    root_ok = bool(tem_root(adb))\n    props = adb.getprop_all()
+    root_ok = bool(tem_root(adb))
+    props = adb.getprop_all()
     mem_txt = adb.shell("cat /proc/meminfo", 15)
     mem = parse_meminfo(mem_txt)
     iomem = adb.shell("cat /proc/iomem 2>/dev/null | grep -i 'System RAM'", 15)
@@ -3939,14 +3940,14 @@ def auditar_rede(adb):
     titulo("Rede — diagnóstico inteligente para IPTV"); conectar_ou_explicar(adb)
     props=adb.getprop_all(); iface=props.get("wifi.interface") or "wlan0"
     w=adb.shell("dumpsys wifi 2>/dev/null | grep -i -E 'SSID|RSSI|frequency|link speed|WifiInfo' | head -n 30",20)
-    m=re.search(r"RSSI[:= ]+(-?\\d+)",w,re.I); rssi=int(m.group(1)) if m else None
-    m=re.search(r"(?:frequency|freq)[:= ]+(\\d+)",w,re.I); freq=int(m.group(1)) if m else None
-    m=re.search(r"link.?speed[:= ]+(\\d+)",w,re.I); speed=int(m.group(1)) if m else None
+    m=re.search(r"RSSI[:= ]+(-?\d+)",w,re.I); rssi=int(m.group(1)) if m else None
+    m=re.search(r"(?:frequency|freq)[:= ]+(\d+)",w,re.I); freq=int(m.group(1)) if m else None
+    m=re.search(r"link.?speed[:= ]+(\d+)",w,re.I); speed=int(m.group(1)) if m else None
     ping=adb.shell("ping -c 20 -W 2 1.1.1.1 2>/dev/null",55)
-    m=re.search(r"(\\d+(?:\\.\\d+)?)% packet loss",ping); loss=float(m.group(1)) if m else None
-    m=re.search(r"= [\\d.]+/[\\d.]+/([\\d.]+)/",ping); avg=float(m.group(1)) if m else None
+    m=re.search(r"(\d+(?:\.\d+)?)% packet loss",ping); loss=float(m.group(1)) if m else None
+    m=re.search(r"= [\d.]+/[\d.]+/([\d.]+)/",ping); avg=float(m.group(1)) if m else None
     dns=adb.shell("ping -c 2 -W 2 google.com 2>/dev/null",15)
-    dns_ok=bool(re.search(r"bytes from|\\d+ packets transmitted, [1-9]\\d* received",dns,re.I))
+    dns_ok=bool(re.search(r"bytes from|\d+ packets transmitted, [1-9]\d* received",dns,re.I))
     sleep=setting_get(adb,"global","wifi_sleep_policy"); root=bool(tem_root(adb))
     band="5 GHz" if freq and freq>=5000 else "2,4 GHz" if freq and freq<3000 else "não identificada"
     signal="bom" if rssi is not None and rssi>=-60 else "mediano" if rssi is not None and rssi>=-67 else "fraco" if rssi is not None else "não informado"
@@ -3964,8 +3965,8 @@ def auditar_rede(adb):
         j=carregar_journal(); ok,msg=setting_put(adb,j,"global","wifi_sleep_policy","2"); actions.append({"acao":"wifi_sleep_policy=2","resultado":msg if ok else msg}); say(msg if ok else "Não aplicado: "+msg)
     if choice in (("2","3") if can else ("1",)):
         ext=adb.shell("ping -c 30 -W 2 1.1.1.1 2>/dev/null",75)
-        m=re.search(r"(\\d+(?:\\.\\d+)?)% packet loss",ext); pl=float(m.group(1)) if m else None
-        m=re.search(r"= [\\d.]+/[\\d.]+/([\\d.]+)/",ext); av=float(m.group(1)) if m else None
+        m=re.search(r"(\d+(?:\.\d+)?)% packet loss",ext); pl=float(m.group(1)) if m else None
+        m=re.search(r"= [\d.]+/[\d.]+/([\d.]+)/",ext); av=float(m.group(1)) if m else None
         actions.append({"acao":"ping_30_pacotes","perda_pct":pl,"latencia_media_ms":av,"saida":ext[-1500:]}); say("Teste estendido concluído.")
     data={"veredito":verdict,"interface":iface,"banda":band,"rssi_dbm":rssi,"frequencia_mhz":freq,"link_speed_mbps":speed,"perda_pct":loss,"latencia_media_ms":avg,"dns_ok":dns_ok,"wifi_sleep_policy_antes":sleep,"root":root,"acoes":actions,"ping_bruto":ping[-2200:],"dns_bruto":dns[-700:]}
     registrar_relatorio_operacional("Rede IPTV",verdict,data)
@@ -3976,9 +3977,9 @@ def auditar_video(adb):
     p=adb.getprop_all(); platform={k:p.get(k,"") for k in ("ro.product.board","ro.board.platform","ro.hardware","ro.product.cpu.abi") if p.get(k)}
     raw=adb.shell("cmd media.codec list 2>/dev/null | head -n 220",30)
     if len(raw.strip())<20: raw=adb.shell("dumpsys media.codec 2>/dev/null | head -n 160",25)
-    names=sorted(set(re.findall(r"(?:OMX|c2)\\.[A-Za-z0-9_.-]+",raw)))
-    hw=[n for n in names if not re.search(r"google|software|sw\\.",n,re.I)]; sw=[n for n in names if n not in hw]
-    wm=adb.shell("wm size",12); phys=re.search(r"Physical size:\\s*(\\d+)x(\\d+)",wm); over=re.search(r"Override size:\\s*(\\d+)x(\\d+)",wm)
+    names=sorted(set(re.findall(r"(?:OMX|c2)\.[A-Za-z0-9_.-]+",raw)))
+    hw=[n for n in names if not re.search(r"google|software|sw\.",n,re.I)]; sw=[n for n in names if n not in hw]
+    wm=adb.shell("wm size",12); phys=re.search(r"Physical size:\s*(\d+)x(\d+)",wm); over=re.search(r"Override size:\s*(\d+)x(\d+)",wm)
     mismatch=bool(phys and over and (phys.group(1),phys.group(2))!=(over.group(1),over.group(2)))
     say("Plataforma: %s."%(platform.get("ro.board.platform") or platform.get("ro.hardware") or "não identificada"))
     say("Codecs expostos: %d (%d nomes de fabricante; %d software)."%(len(names),len(hw),len(sw)) if names else "Firmware não expôs lista confiável de codecs.")
