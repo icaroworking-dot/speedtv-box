@@ -218,6 +218,15 @@ WAVE2 = [
     "com.facebook.appmanager",
     "com.facebook.services",
     "com.facebook.orca",
+    "com.tv.clean",
+    "com.yxt.factorytest",
+    "com.android.app.cus.aging",
+    "com.android.amediatech.fota",
+    "com.abupdate.fota_demo_iot",
+    "com.google.android.youtube.tv.recommendations",
+    "com.google.android.partnersetup",
+    "com.google.android.backuptransport",
+    "com.google.android.syncadapters.contacts",
     "com.android.calculator2",
     "com.google.android.calculator",
     "com.android.camera2",
@@ -297,6 +306,8 @@ LIXO_FABRICA = (
     ("com.google.android.videos", "Filmes Google"),
     ("com.ionitech.airscreen", "AirScreen"),
     ("com.softwinner.fireplayer", "Player da placa"),
+    ("tv.pluto.android", "Pluto TV"),
+    ("org.videolan.vlc", "VLC"),
 )
 
 BAD_EXACT = {
@@ -3441,9 +3452,14 @@ def primeira_vez(adb, sim=False, sem_onda3=False):
 
 
 # Instalações oficiais. O agente baixa apenas APKs de hosts/repositórios definidos.
+def origem_https_permitida(url, hosts):
+    parsed = urlparse(url)
+    return parsed.scheme == "https" and parsed.hostname in hosts
+
+
 def _ler_json_https(url, hosts):
     parsed = urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname not in hosts:
+    if not origem_https_permitida(url, hosts):
         raise ValueError("Origem de atualização não autorizada: %s" % (parsed.hostname or "?"))
     req = urllib.request.Request(url, headers={"User-Agent": "SpeedTVBox/9"})
     with urllib.request.urlopen(req, timeout=35) as response:
@@ -3469,7 +3485,7 @@ def _asset_apk(api_url, hosts):
 
 def _baixar_apk(url, destino, hosts):
     parsed = urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname not in hosts:
+    if not origem_https_permitida(url, hosts):
         raise ValueError("Download bloqueado: origem não autorizada.")
     req = urllib.request.Request(url, headers={"User-Agent": "SpeedTVBox/9"})
     with urllib.request.urlopen(req, timeout=90) as response:
@@ -3853,6 +3869,10 @@ def submenu(adb, sim=False):
             say("Não reconheci essa opção.")
 
 def selftest():
+    assert VERSAO == "9"
+    assert origem_https_permitida("https://api.github.com/repos/a/b", {"api.github.com"})
+    assert not origem_https_permitida("http://api.github.com/repos/a/b", {"api.github.com"})
+    assert not origem_https_permitida("https://api.github.com.evil.invalid/a", {"api.github.com"})
     assert validar_pacote("com.android.vending")
     assert not validar_pacote("com.foo;rm")
     assert not validar_pacote("rm -rf")
