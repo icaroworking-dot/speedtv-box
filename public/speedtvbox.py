@@ -1282,46 +1282,47 @@ def processos_pesados(texto, instalados, gate):
 
 
 def varrer_boot(adb):
-    """Scripts de boot que recriam vírus a cada liga. Não mexe no init principal."""
-    lista = adb.shell(
-        "grep -l -i -E 'xmrig|adups|coinhive|minergate|oemservice|nohup|classes.dex' "
-        "/system/etc/init/* /vendor/etc/init/* /system/etc/*.sh /system/bin/*.sh 2>/dev/null",
-        25,
-    )
-    achados = []
+    """Busca indicadores em scripts de boot; com root inclui partição OEM."""
+    root=tem_root(adb)
+    padroes="/system/etc/init/* /vendor/etc/init/* /odm/etc/init/* /product/etc/init/* /system/etc/*.sh /system/bin/*.sh"
+    if root: padroes += " /oem/etc/init/* /oem/etc/*.rc /oem/*.sh /oem/bin/*.sh"
+    cmd="grep -l -i -E 'xmrig|adups|coinhive|minergate|oemservice|nohup|classes.dex' "+padroes+" 2>/dev/null"
+    lista=adb.shell("%s -c '%s'"%(root,cmd),30) if root else adb.shell(cmd,25)
+    achados=[]
     for linha in lista.splitlines():
-        arq = linha.strip()
-        if not re.match(r"^/[\w./\-]+$", arq):
-            continue
-        nome = arq.rsplit("/", 1)[-1]
-        protegido = nome in ("init.rc", "init.environ.rc", "ueventd.rc", "bootanim.rc") or nome.startswith("init.")
-        trecho = adb.shell("head -c 400 %s 2>/dev/null" % arq, 12)
-        achados.append({"arquivo": arq, "protegido": protegido, "trecho": (trecho or "")[:200]})
-        if len(achados) >= 12:
-            break
+        arq=linha.strip()
+        if not re.match(r"^/[\\w./\\-]+$",arq): continue
+        nome=arq.rsplit("/",1)[-1]
+        protegido=nome in ("init.rc","init.environ.rc","ueventd.rc","bootanim.rc") or nome.startswith("init.")
+        leitura="head -c 400 %s 2>/dev/null"%arq
+        trecho=adb.shell("%s -c '%s'"%(root,leitura),12) if root else adb.shell(leitura,12)
+        achados.append({"arquivo":arq,"protegido":protegido,"trecho":(trecho or "")[:200],"leitura_root":bool(root)})
+        if len(achados)>=20: break
     return achados
 
 
-def afastar_scripts(adb, journal, itens):
-    root = tem_root(adb)
+def afastar_scripts(adb,journal,itens):
+    root=tem_root(adb)
     if not root:
-        say("Sem root. Não dá para tirar script de boot. Dá para desativar o app, mas ele pode voltar ao ligar.")
-        return []
-    movidos = []
+        say("Sem root: scripts de boot não podem ser alterados."); return []
+    movidos=[]
     for item in itens:
-        arq = item.get("arquivo") or ""
+        arq=item.get("arquivo") or ""
         if item.get("protegido"):
-            say("  deixo %s no lugar. É script do sistema. Mover isso pode impedir a TV Box de ligar." % arq)
-            continue
-        if not re.match(r"^/[\w./\-]+$", arq):
-            continue
-        bak = arq + ".speedtv-bak"
-        adb.shell("%s -c 'mv %s %s'" % (root, arq, bak), 15)
-        journal.setdefault("scripts", []).append({"de": arq, "bak": bak})
-        salvar_journal(journal)
-        movidos.append(arq)
-        say("  tirei do boot: %s" % arq)
-        say("  a cópia ficou em %s. A opção Desfazer coloca de volta." % bak)
+            say("  protegido, não alterei: "+arq); continue
+        if not re.match(r"^/[\\w./\\-]+$",arq): continue
+        bak=arq+".speedtv-bak"
+        if "EXISTE" in adb.shell("%s -c '[ -e %s ] && echo EXISTE'"%(root,bak),12):
+            say("  backup já existe; não sobrescrevi: "+bak); continue
+        entry={"de":arq,"bak":bak,"pendente":True}
+        journal.setdefault("scripts",[]).append(entry); salvar_journal(journal)
+        out=adb.shell("%s -c 'if [ -f %s ]; then mv %s %s && echo SPEEDTV_MOVED; else echo SPEEDTV_MISSING; fi'"%(root,arq,arq,bak),20)
+        if "SPEEDTV_MOVED" in out:
+            entry["pendente"]=False; salvar_journal(journal); movidos.append(arq)
+            say("  quarentena aplicada; backup: "+bak)
+        else:
+            journal["scripts"]=[x for x in journal.get("scripts",[]) if x is not entry]; salvar_journal(journal)
+            say("  não alterei %s: %s"%(arq," ".join(out.split())[:140]))
     return movidos
 
 
@@ -2025,21 +2026,27 @@ def reverter(adb, sim=False):
         say("  resolução e densidade voltaram ao padrão da TV Box.")
     if tem_oem:
         say(restaurar_oem(adb, tem_root(adb), journal))
+    scripts_pendentes = []
     if scripts:
         root = tem_root(adb)
         for item in scripts:
             origem, bak = item.get("de") or "", item.get("bak") or ""
             if root and re.match(r"^/[\w./\-]+$", origem) and re.match(r"^/[\w./\-]+$", bak):
-                adb.shell("%s -c 'mv %s %s'" % (root, bak, origem), 15)
-                say("  script de volta: %s" % origem)
+                out = adb.shell("%s -c 'if [ -e %s ]; then mv %s %s && echo SPEEDTV_RESTORED; else echo SPEEDTV_MISSING; fi'" % (root, bak, bak, origem), 20)
+                if "SPEEDTV_RESTORED" in out or "SPEEDTV_MISSING" in out:
+                    say("  script restaurado/backup ausente: %s" % origem)
+                else:
+                    scripts_pendentes.append(item)
+                    say("  falha ao restaurar %s; mantive no journal." % origem)
             else:
+                scripts_pendentes.append(item)
                 say("  não consegui devolver %s" % origem)
     journal["disabled"] = []
     journal["package_states"] = {}
     journal["removidos"] = []
     journal["settings"] = []
     journal["wm"] = {}
-    journal["scripts"] = []
+    journal["scripts"] = scripts_pendentes
     journal.setdefault("notas", []).append("revertido em " + agora_iso())
     salvar_journal(journal)
     escrever_rollback(adb.serial, adb.binary, [])
