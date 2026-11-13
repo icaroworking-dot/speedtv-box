@@ -2030,7 +2030,7 @@ def reverter(adb, sim=False):
             adb.shell("wm size reset", 12)
         densidade_antes = journal.get("wm", {}).get("density_antes")
         if densidade_antes:
-            mdensity = re.search(r"Override density:\\s*(\\d+)", densidade_antes)
+            mdensity = re.search(r"Override density:\s*(\d+)", densidade_antes)
             if mdensity:
                 adb.shell("wm density " + mdensity.group(1), 12)
             else:
