@@ -72,13 +72,13 @@ const PASSOS = [
     n: "02",
     nome: "Depuração",
     texto:
-      "Mesma Wi-Fi do celular. Configurações, Sobre, sete toques em Compilação. Opções do desenvolvedor, Depuração USB. No Android 11 ou mais novo, a depuração sem fio mostra um código. Anote o IP da rede. A porta do dia a dia é 5555. A porta do pareamento é outra, a que está na tela.",
+      "Mesma Wi-Fi do celular. Configurações, Sobre, sete toques em Compilação. Opções do desenvolvedor, Depuração USB. No Android 11 ou mais novo, a depuração sem fio mostra um código. Anote o IP da rede. O agente acrescenta a porta ADB 5555 automaticamente; a porta de pareamento é usada somente durante o pareamento sem fio.",
   },
   {
     n: "03",
     nome: "Baixar o agente",
     texto:
-      "Nesta página, aba Preparar agente. Cole somente o IP (sem :5555) e a chave do Gemini, toque em Gerar .py e depois no link Salvar .py. A chave fica dentro desse arquivo. Não o publique.",
+      "Nesta página, aba Preparar agente. Cole somente o IP (sem :5555) e a chave do Gemini, toque em Gerar .py; o arquivo será baixado diretamente. A chave fica dentro desse arquivo. Não o publique.",
   },
   {
     n: "04",
@@ -470,7 +470,7 @@ export function Console() {
 
         <aside className="rounded-2xl border border-line bg-bg-raised p-5">
           <p className="font-display text-2xl text-fg">No Termux</p>
-          <p className="mt-3 text-sm text-muted">Gere e salve o .py. Depois cole isto inteiro, de uma vez:</p>
+          <p className="mt-3 text-sm text-muted">Gere o .py. Depois cole isto inteiro, de uma vez:</p>
           <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-fg">{BLOCO_TERMUX}</pre>
           <button
             type="button"
