@@ -25,6 +25,7 @@ jobs:
       - name: Run built-in tests
         run: python public/speedtvbox.py selftest
 
+  # Keep the browser app checked separately from the device-side Python agent.
   web-app:
     runs-on: ubuntu-latest
     steps:
