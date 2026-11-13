@@ -38,7 +38,7 @@ DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "12"
+VERSAO = "13"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -1280,26 +1280,132 @@ def frases_relatorio(r):
     return frases
 
 
+def pacote_do_processo(nome, instalados):
+    """Resolve processos auxiliares para o pacote proprietário."""
+    nome = (nome or "").strip()
+    if nome in instalados:
+        return nome
+    base = nome.split(":", 1)[0]
+    if base in instalados:
+        return base
+    for pkg in sorted(instalados, key=len, reverse=True):
+        if nome.startswith(pkg + ".") or nome.startswith(pkg + ":"):
+            return pkg
+    return None
+
+
+def parse_ps_processos(texto):
+    """Lê ps antigo (Android 7/Rockchip) e formatos mais novos sem exigir ps -A."""
+    itens = []
+    for line in (texto or "").splitlines():
+        parts = line.split(None, 8)
+        if len(parts) < 9 or not parts[1].isdigit() or not parts[2].isdigit():
+            continue
+        if not parts[3].isdigit() or not parts[4].isdigit():
+            continue
+        nome = parts[8].strip()
+        if nome:
+            itens.append({
+                "usuario": parts[0], "pid": int(parts[1]), "ppid": int(parts[2]),
+                "vsize_kb": int(parts[3]), "rss_kb": int(parts[4]), "nome": nome,
+            })
+    return itens
+
+
+def coletar_ps_compativel(adb):
+    """Tenta ps -A; recua para ps simples em ROMs antigas."""
+    moderno = adb.shell("ps -A", 20)
+    itens = parse_ps_processos(moderno)
+    if itens:
+        return moderno, itens, "ps -A"
+    antigo = adb.shell("ps", 20)
+    return antigo, parse_ps_processos(antigo), "ps"
+
+
+def parse_servicos_atividade(texto, instalados=None):
+    """Extrai ServiceRecord do ActivityManager."""
+    instalados = set(instalados or [])
+    itens = []
+    blocos = re.split(r"(?m)(?=^\\s*\\* ServiceRecord\\{)", texto or "")
+    for bloco in blocos:
+        if "ServiceRecord{" not in bloco:
+            continue
+        mp = re.search(r"(?m)^\\s*packageName=([A-Za-z][A-Za-z0-9_.]+)", bloco)
+        if not mp:
+            continue
+        pkg = mp.group(1)
+        if not validar_pacote(pkg):
+            continue
+        mi = re.search(r"(?m)^\\s*intent=\\{[^\\n]*?cmp=([^\\s}]+)", bloco)
+        componente = mi.group(1) if mi else pkg
+        proc = re.search(r"(?m)^\\s*processName=([^\\s]+)", bloco)
+        started = re.search(r"\\bstartRequested=(true|false)", bloco)
+        fg = re.search(r"\\bcreatedFromFg=(true|false)", bloco)
+        restart = re.search(r"\\brestartCount=(\\d+)", bloco)
+        itens.append({
+            "pacote": pkg, "componente": componente,
+            "processo": proc.group(1) if proc else pkg,
+            "iniciado": bool(started and started.group(1) == "true"),
+            "criado_em_primeiro_plano": bool(fg and fg.group(1) == "true"),
+            "reinicios": int(restart.group(1)) if restart else 0,
+            "instalado": pkg in instalados if instalados else None,
+        })
+    return itens
+
+
+def inventario_pacotes(paths, instalados, sistema, terceiros, desativados, removidos):
+    """Classifica origem e estado sem recomendar remoção automaticamente."""
+    itens = []
+    todos = set(paths) | set(instalados) | set(removidos)
+    for pkg in sorted(todos):
+        path = paths.get(pkg, "")
+        if pkg in removidos:
+            estado = "removido_apenas_para_usuario"
+        elif pkg in desativados:
+            estado = "desativado"
+        else:
+            estado = "instalado"
+        origem = "sistema" if pkg in sistema or path.startswith(("/system/", "/product/", "/vendor/", "/odm/", "/system_ext/")) else "dados" if path.startswith("/data/") else "não identificada"
+        if pkg.startswith("com.google.") or pkg.startswith("com.android.vending"):
+            familia = "Google"
+        elif any(x in pkg.lower() for x in ("rockchip", "droidlogic", "uota", "factory", "devicetest", "stresstest", "changeled")):
+            familia = "fabricante"
+        elif pkg.startswith("com.android.") or pkg == "android":
+            familia = "Android"
+        else:
+            familia = "outro"
+        itens.append({
+            "pacote": pkg, "caminho_apk": path or None, "origem": origem,
+            "estado": estado, "familia": familia, "terceiro": pkg in terceiros,
+        })
+    return itens
+
+
 def processos_pesados(texto, instalados, gate):
-    """Processos que comem RAM e são um pacote. O núcleo do Android fica de fora."""
+    """Agrupa PSS por pacote pai, incluindo processos auxiliares Google e :background."""
     nucleo = {
         "system_server", "surfaceflinger", "mediaserver", "mediaserver64",
         "netd", "vold", "zygote", "zygote64", "adbd", "keystore", "installd",
         "servicemanager", "lmkd", "logd", "audioserver", "cameraserver", "drmserver",
         "android.hardware.graphics.composer", "tombstoned",
     }
-    vistos = set()
-    itens = []
-    for item in parse_rss(texto or "")[:20]:
-        nome = (item.get("nome") or "").split(":")[0]
-        if nome in nucleo or nome in vistos:
+    agrupados = {}
+    for item in parse_rss(texto or ""):
+        nome = (item.get("nome") or "").strip()
+        pkg = pacote_do_processo(nome, instalados)
+        if not pkg or pkg in nucleo:
             continue
-        if not validar_pacote(nome) or nome not in instalados:
-            continue
-        vistos.add(nome)
-        motivo = gate.motivo(nome) if gate else None
-        itens.append({"pacote": nome, "kb": item.get("kb") or 0, "protegido": motivo or ""})
-    return itens
+        grupo = agrupados.setdefault(pkg, {"pacote": pkg, "kb": 0, "processos": [], "protegido": ""})
+        grupo["kb"] += item.get("kb") or 0
+        grupo["processos"].append(nome)
+        if item.get("aberto"):
+            grupo["em_primeiro_plano"] = True
+    itens = list(agrupados.values())
+    for item in itens:
+        motivo = gate.motivo(item["pacote"]) if gate else None
+        item["protegido"] = motivo or ""
+        item["processos"].sort()
+    return sorted(itens, key=lambda x: x.get("kb", 0), reverse=True)
 
 
 def varrer_boot(adb):
@@ -1367,6 +1473,7 @@ def auditar(adb, falar=True):
     release = props.get("ro.build.version.release", "")
     veredito = avaliar_android(sdk, release, kernel)
     dumpsys_mem = adb.shell("dumpsys meminfo | head -n 30", 25)
+    dumpsys_mem_full = adb.shell("dumpsys meminfo", 45)
     total_ram_dump = None
     m = re.search(r"Total RAM:\s+([\d,]+)", dumpsys_mem)
     if m:
@@ -1467,6 +1574,9 @@ def auditar(adb, falar=True):
     terceiros = adb.third_names()
     desativados = adb.disabled_names()
     removidos = adb.uninstalled_names()
+    todos_conhecidos = set(parse_pm_names(adb.shell("pm list packages -u", 35)))
+    caminhos_todos = parse_pm_paths(adb.shell("pm list packages -f -u", 40))
+    inventario = inventario_pacotes(caminhos_todos, set(packages), sistema, terceiros, desativados, removidos)
 
     play_estado = []
     for pkg in dict.fromkeys(PLAY_STACK):
@@ -1538,9 +1648,18 @@ def auditar(adb, falar=True):
     except Exception:
         boot_scripts = []
     try:
-        pesados = processos_pesados(dumpsys_mem, set(packages), Gate(coletar_dinamicos(adb)))
+        ps_raw, ps_itens, ps_modo = coletar_ps_compativel(adb)
+    except Exception:
+        ps_raw, ps_itens, ps_modo = "", [], "indisponível"
+    try:
+        pesados = processos_pesados(dumpsys_mem_full, set(packages), Gate(coletar_dinamicos(adb)))
     except Exception:
         pesados = []
+    try:
+        servicos_atividade_raw = adb.shell("dumpsys activity services", 40)
+        servicos_atividade = parse_servicos_atividade(servicos_atividade_raw, set(packages))
+    except Exception:
+        servicos_atividade_raw, servicos_atividade = "", []
 
     relatorio = {
         "quando": agora_iso(),
@@ -1586,8 +1705,10 @@ def auditar(adb, falar=True):
         "boot_ms": boot_ms,
         "usuario": adb.user,
         "pacotes": len(packages),
+        "pacotes_total_conhecidos": len(todos_conhecidos),
         "sistema": len(sistema),
         "terceiros": len(terceiros),
+        "pacotes_inventario": inventario,
         "pacotes_instalados": sorted(packages),
         "pacotes_sistema": sorted(sistema),
         "pacotes_terceiros": sorted(terceiros),
@@ -1601,6 +1722,11 @@ def auditar(adb, falar=True):
         "init_suspeito": sus_init,
         "init_contagem": {k: len(v) for k, v in inits.items()},
         "servicos_rodando": len(servicos),
+        "servicos_atividade": servicos_atividade,
+        "servicos_atividade_total": len(servicos_atividade),
+        "processos_kernel_total": len(ps_itens),
+        "processos_coleta_modo": ps_modo,
+        "processos_pacote": ps_itens,
         "crash_trecho": crash.strip()[:2500],
         "root": root_ok,
         "boot_scripts": boot_scripts,
@@ -1667,9 +1793,33 @@ def imprimir_auditoria(r):
     if r.get("boot_ms"):
         say("Boot até a marca    : %.1f s (evento boot_progress)" % (r["boot_ms"] / 1000.0))
     say("")
-    say("Pacotes             : %s no total, %s de sistema, %s de terceiros, %s desativados" % (
-        r.get("pacotes"), r.get("sistema"), r.get("terceiros"), len(r.get("desativados") or [])))
+    say("Pacotes             : %s instalados, %s conhecidos com -u, %s de sistema, %s de terceiros, %s desativados" % (
+        r.get("pacotes"), r.get("pacotes_total_conhecidos"), r.get("sistema"), r.get("terceiros"), len(r.get("desativados") or [])))
+    if r.get("pacotes_inventario"):
+        familias = {}
+        estados = {}
+        for item in r["pacotes_inventario"]:
+            familia = item.get("familia", "outro")
+            estado = item.get("estado", "desconhecido")
+            familias[familia] = familias.get(familia, 0) + 1
+            estados[estado] = estados.get(estado, 0) + 1
+        say("  Famílias          : " + ", ".join("%s=%d" % (k, v) for k, v in sorted(familias.items())))
+        say("  Estados           : " + ", ".join("%s=%d" % (k, v) for k, v in sorted(estados.items())))
     say("Serviços init vivos : %s" % r.get("servicos_rodando"))
+    say("Serviços Android ativos: %s" % r.get("servicos_atividade_total", 0))
+    say("Processos visíveis pelo kernel: %s (modo %s)" % (r.get("processos_kernel_total", 0), r.get("processos_coleta_modo", "?")))
+    if r.get("pesados"):
+        say("Maiores consumidores por aplicativo (PSS agrupado):")
+        for item in r["pesados"][:10]:
+            estado = "primeiro plano" if item.get("em_primeiro_plano") else "segundo plano/cache"
+            risco = " · protegido" if item.get("protegido") else ""
+            say("  %s — %s · %s%s" % (item.get("pacote"), kb_mb(item.get("kb")), estado, risco))
+            if len(item.get("processos") or []) > 1:
+                say("    processos: " + ", ".join(item["processos"][:6]))
+    if r.get("servicos_atividade"):
+        say("Serviços ativos por pacote (até 12):")
+        for item in r["servicos_atividade"][:12]:
+            say("  %s → %s [%s]" % (item.get("pacote"), item.get("componente"), "iniciado" if item.get("iniciado") else "vinculado/registrado"))
     if r.get("init_contagem"):
         say("Scripts de boot     : %s" % ", ".join("%s=%s" % (k.split("/")[-2] + "/" + k.split("/")[-1], v) for k, v in r["init_contagem"].items()))
     if r.get("init_suspeito"):
@@ -1959,15 +2109,15 @@ def executar_ondas(adb, sim=False, sem_onda3=False):
         return vistos
 
     o1 = presentes(WAVE1)
-    topo = adb.shell("dumpsys meminfo | head -n 40", 20)
+    topo = adb.shell("dumpsys meminfo", 45)
     pesados = processos_pesados(topo, instalados, gate)
-    extra_ram = [p["pacote"] for p in pesados if not p.get("protegido") and (p.get("kb") or 0) >= 30000]
-    o2 = presentes(list(dict.fromkeys(WAVE2 + candidatos_onda2(sistema) + extra_ram)))
+    # RAM alta é evidência para investigar, nunca autorização automática para desativar.
+    o2 = presentes(list(dict.fromkeys(WAVE2 + candidatos_onda2(sistema))))
     o3 = presentes(WAVE3)
     if pesados:
-        say("Quem mais usa RAM agora:")
-        for item in pesados[:6]:
-            say("  %s  %s%s" % (kb_mb(item.get("kb")), item.get("pacote"), "  (fica)" if item.get("protegido") else ""))
+        say("Quem mais usa RAM agora (PSS agrupado; não adiciona pacotes automaticamente ao debloat):")
+        for item in pesados[:8]:
+            say("  %s  %s%s" % (kb_mb(item.get("kb")), item.get("pacote"), "  (protegido)" if item.get("protegido") else ""))
     say("")
     say("Onda 1, %d aplicativos (telefone, impressão, telemetria)." % len(o1))
     say("Onda 2, %d aplicativos (anúncio, recomendação, app de telefone e o que está gastando RAM à toa)." % len(o2))
@@ -2897,17 +3047,23 @@ def status_ram(adb):
     conectar_ou_explicar(adb)
     m = coletar_metricas(adb, "agora")
     say(linha_metrica(m))
-    topo = adb.shell("dumpsys meminfo | head -n 18", 20)
-    apps = parse_rss(topo)
+    topo = adb.shell("dumpsys meminfo", 45)
+    instalados = set(adb.installed_map())
+    apps = processos_pesados(topo, instalados, Gate(coletar_dinamicos(adb)))
     if apps:
-        say("Quem está comendo memória:")
-        for app in apps[:5]:
-            uso = "aberto na tela" if app["aberto"] else "segundo plano"
-            say("  %s — %d MB (%s)" % (app["nome"], app["kb"] // 1024, uso))
-        say("Play Store, GMS e SystemUI pesam e ficam. App de terceiro em segundo plano dá para fechar no exame de boot.")
+        say("Maiores consumidores por aplicativo (PSS agrupado):")
+        for app in apps[:10]:
+            uso = "atividade em primeiro plano" if app.get("em_primeiro_plano") else "segundo plano/cache"
+            protecao = " · protegido" if app.get("protegido") else ""
+            say("  %s — %s (%s)%s" % (app["pacote"], kb_mb(app["kb"]), uso, protecao))
+            if len(app.get("processos") or []) > 1:
+                say("    processos: " + ", ".join(app["processos"][:6]))
     else:
-        say(topo)
-    log = anexar_log("ram", topo, linha_metrica(m))
+        say("Não foi possível associar linhas PSS a pacotes instalados.")
+        say(topo[:5000])
+    ps_raw, ps_itens, ps_modo = coletar_ps_compativel(adb)
+    say("Processos visíveis pelo kernel: %d (coleta por %s)." % (len(ps_itens), ps_modo))
+    log = anexar_log("ram", topo[:20000], linha_metrica(m))
     dizer_onde(log)
 
 
@@ -3626,6 +3782,13 @@ details{border-top:1px solid #ffffff12;padding:13px 0}details summary{cursor:poi
             "pacotes_desativados_antes": antes.get("desativados"),
             "display": antes.get("display"),
             "servicos_rodando": antes.get("servicos_rodando"),
+            "servicos_atividade": antes.get("servicos_atividade"),
+            "servicos_atividade_total": antes.get("servicos_atividade_total"),
+            "processos_kernel_total": antes.get("processos_kernel_total"),
+            "processos_coleta_modo": antes.get("processos_coleta_modo"),
+            "processos_pesados_pss_agrupados": antes.get("pesados"),
+            "pacotes_inventario": antes.get("pacotes_inventario"),
+            "pacotes_total_conhecidos": antes.get("pacotes_total_conhecidos"),
             "init_contagem": antes.get("init_contagem"),
             "init_suspeito": antes.get("init_suspeito"),
             "ruins": antes.get("ruins"),
@@ -4487,7 +4650,7 @@ def submenu(adb, sim=False):
             say("Não reconheci essa opção.")
 
 def selftest():
-    assert VERSAO == "12"
+    assert VERSAO == "13"
     assert SDK_ANDROID_VERSION[25] == "7.1"
     assert avaliar_android(25, "10.1", (3, 10))["mentira"] is True
     assert "Android 7.1" in linha_android({"release":"10.1","sdk":25,"kernel":"3.10","android":avaliar_android(25,"10.1",(3,10))})
@@ -4557,11 +4720,29 @@ def selftest():
     amostra = "com.android.tv.settings/com.android.tv.settings.MainSettings\n"
     assert re.findall(r"([A-Za-z][\w.]*)/", amostra) == ["com.android.tv.settings"]
     pesados = processos_pesados(
-        "    80,000K: com.android.calendar (pid 1)\n    90,000K: system_server (pid 2)\n",
-        {"com.android.calendar"},
+        "    80,000K: com.android.calendar (pid 1)\n"
+        "    69,578K: com.google.android.gms (pid 2)\n"
+        "    35,860K: com.google.android.gms.unstable (pid 3)\n"
+        "    22,893K: com.google.android.gms.learning (pid 4)\n"
+        "    90,000K: system_server (pid 5)\n",
+        {"com.android.calendar", "com.google.android.gms"},
         Gate(),
     )
-    assert pesados and pesados[0]["pacote"] == "com.android.calendar"
+    assert pesados and pesados[0]["pacote"] == "com.google.android.gms"
+    assert pesados[0]["kb"] == 128331
+    assert len(pesados[0]["processos"]) == 3
+    ps_sample = "USER PID PPID VSIZE RSS WCHAN PC S NAME\nroot 1 0 7608 1260 ep_poll 00000000 S /init\n"
+    assert parse_ps_processos(ps_sample)[0]["nome"] == "/init"
+    svc_sample = "* ServiceRecord{abc u0 com.rockchips.mediacenter/.service.MediaUpnpService}\n    intent={cmp=com.rockchips.mediacenter/.service.MediaUpnpService}\n    packageName=com.rockchips.mediacenter\n    processName=com.rockchips.mediacenter\n    startRequested=true createdFromFg=false restartCount=0\n"
+    parsed_services = parse_servicos_atividade(svc_sample, {"com.rockchips.mediacenter"})
+    assert parsed_services and parsed_services[0]["pacote"] == "com.rockchips.mediacenter"
+    assert parsed_services[0]["iniciado"] is True
+    inv = inventario_pacotes(
+        {"com.android.vending": "/system/app/Vending.apk", "com.example.app": "/data/app/app.apk"},
+        {"com.android.vending", "com.example.app"},
+        {"com.android.vending"}, {"com.example.app"}, set(), set(),
+    )
+    assert len(inv) == 2 and inv[0]["caminho_apk"]
     assert ram_usavel_kb({"MemFree": 40000, "Cached": 700000, "Buffers": 10000}) == 750000
     assert candidatos_profundos(
         ["com.rockchips.mediacenter", "com.droidlogic.mboxlauncher", "com.android.vending"], Gate(),
