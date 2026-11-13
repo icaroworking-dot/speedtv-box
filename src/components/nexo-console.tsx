@@ -215,8 +215,8 @@ async function lerAgente(): Promise<string> {
   }
   const texto = await res.text();
   if (
-    !/DISPOSITIVO_PADRAO\\s*=\\s*"/.test(texto) ||
-    !/API_KEY_PADRAO\\s*=\\s*"/.test(texto)
+    !/DISPOSITIVO_PADRAO\s*=\s*"/.test(texto) ||
+    !/API_KEY_PADRAO\s*=\s*"/.test(texto)
   ) {
     throw new Error(
       "O endereço do agente devolveu uma página em vez do arquivo Python. Avise que o download está indisponível."
@@ -263,7 +263,7 @@ function personalizar(texto: string, ip: string, api: string): string {
 
 function criarArquivo(texto: string): string {
   return URL.createObjectURL(
-    new Blob(["\\uFEFF", texto], { type: "text/plain;charset=utf-8" })
+    new Blob(["\uFEFF", texto], { type: "text/plain;charset=utf-8" })
   );
 }
 
