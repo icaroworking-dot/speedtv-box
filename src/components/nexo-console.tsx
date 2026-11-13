@@ -34,7 +34,7 @@ const ONDAS = [
     n: "04",
     nome: "Relatório",
     texto:
-      "Um texto em Download/SpeedTV: antes e depois, a lista do que saiu, a RAM verdadeira, o Android verdadeiro e o Widevine.",
+      "Uma pasta por sessão, com relatório HTML visual, resumo TXT, dados completos e histórico de cada alteração. O journal de reversão fica separado e persistente.",
   },
 ];
 
@@ -44,7 +44,7 @@ const MEDIDAS = [
   ["Widevine", "Lê o nível DRM. L1 não garante certificação do aplicativo, liberação de HD/4K nem compatibilidade do serviço; isso depende também do provedor e do dispositivo."],
   ["Ameaça", "Procura indicadores publicados do XCPE, como x.cpe, com.oemservice, com.abc.nexus e droppers conhecidos. Adups/OTA pode ser componente legítimo ou suspeito conforme a variante; o nome sozinho não confirma infecção. A auditoria não é um antivírus completo."],
   ["Play", "O que está desativado, escondido ou removido só para o usuário, inclusive WebView e Trichrome."],
-  ["Termux", "O relatório vai para Download/SpeedTV, a pasta que abre no app Arquivos."],
+  ["Termux", "Cada execução cria uma pasta em Download/SpeedTV/Sessoes, organizada por data e horário, com o relatório HTML, TXT, JSON e logs daquela sessão."],
 ];
 
 const COMANDOS = [
@@ -84,7 +84,7 @@ const PASSOS = [
     n: "04",
     nome: "Escolher 1",
     texto:
-      "No Termux, cole o bloco inteiro. Dentro do agente, escolha 1. O relatório fica em Download/SpeedTV.",
+      "No Termux, cole o bloco inteiro. Dentro do agente, escolha 1. Os relatórios ficam em Download/SpeedTV/Sessoes, separados por execução.",
   },
 ];
 
@@ -95,7 +95,7 @@ function Tutorial() {
         <p className="font-mono text-xs tracking-widest text-amber">PRIMEIRA VEZ</p>
         <h2 className="mt-2 font-display text-4xl leading-none text-fg">Da preparação ao relatório</h2>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-          Não precisa formatar a TV Box para começar. Escolha 1 para auditar, revisar os riscos e decidir o que será desativado. O relatório vai para Download/SpeedTV quando o Android permitir.
+          Não precisa formatar a TV Box para começar. Escolha 1 para auditar, revisar os riscos e decidir o que será desativado. Os relatórios ficam em Download/SpeedTV/Sessoes, separados por data e horário, quando o Android permitir.
         </p>
       </section>
 
@@ -187,7 +187,7 @@ python speedtvbox.py`}</pre>
             <span className="text-fg">Limpa em ondas.</span> Perfis conhecidos de telemetria, anúncios, apps de telefone, mapas, recomendações e utilitários de fábrica, além dos grupos opcionais. Mede e reinicia entre etapas; se a tela inicial, a loja ou o SystemUI falharem, desfaz a onda que causou o problema.
           </li>
           <li>
-            <span className="text-fg">Relatório.</span> Abra o app Arquivos, pasta Download, pasta SpeedTV. Você verá aplicativos antes e depois, o que foi desativado, RAM disponível, armazenamento, processos, Android, Widevine e gráficos por etapa.
+            <span className="text-fg">Relatório.</span> Abra Arquivos > Download > SpeedTV > Sessoes. Cada pasta contém um relatório HTML visual, resumo TXT, dados técnicos e logs da execução. e gráficos por etapa.
           </li>
         </ol>
       </section>
@@ -373,7 +373,7 @@ export function Console() {
           <h1 className="font-display text-5xl leading-none text-fg sm:text-6xl">SpeedTV Box</h1>
         </div>
         <p className="max-w-xs text-sm text-muted">
-          Gerador v10 · agente Python v9. Auditoria guiada, otimização por etapas, instaladores e relatórios.
+          Gerador v12 · agente Python v12. Auditoria guiada, otimização por etapas, instaladores e relatórios organizados por sessão.
         </p>
       </header>
 
