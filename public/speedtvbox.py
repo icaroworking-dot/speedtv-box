@@ -38,7 +38,7 @@ DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "11"
+VERSAO = "12"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -1435,7 +1435,7 @@ def auditar(adb, falar=True):
     )
     temperaturas = []
     for linha in thermal_raw.splitlines():
-        mt = re.search(r"thermal_zone(\\d+)/temp=(-?\\d+)", linha)
+        mt = re.search(r"thermal_zone(\d+)/temp=(-?\d+)", linha)
         if mt:
             raw = int(mt.group(2))
             celsius = raw / 1000.0 if abs(raw) >= 1000 else float(raw)
@@ -4430,7 +4430,7 @@ def submenu(adb, sim=False):
             say("Não reconheci essa opção.")
 
 def selftest():
-    assert VERSAO == "11"
+    assert VERSAO == "12"
     assert SDK_ANDROID_VERSION[25] == "7.1"
     assert avaliar_android(25, "10.1", (3, 10))["mentira"] is True
     assert "Android 7.1" in linha_android({"release":"10.1","sdk":25,"kernel":"3.10","android":avaliar_android(25,"10.1",(3,10))})
@@ -4533,12 +4533,14 @@ def selftest():
     assert classificar_log("FATAL EXCEPTION MissingWebViewPackageException")[0] == "webview"
     assert validar_valor("dns.google")
     assert not validar_valor("a;rm")
-    global _DADOS
+    global _DADOS, _SESSAO_DIR
     dados_anteriores = _DADOS
+    sessao_anterior = _SESSAO_DIR
     try:
         with tempfile.TemporaryDirectory(prefix="speedtv-selftest-") as tmp:
             _DADOS = Path(tmp)
-            (Path(tmp) / "metricas.jsonl").write_text(
+            _SESSAO_DIR = Path(tmp)
+            (Path(tmp) / "08 - Metricas.jsonl").write_text(
                 json.dumps({"etiqueta": "antes", "mem_available_kb": 500000, "processos": 42, "desativados": 0, "data_livre_kb": 900000}) + "\n"
                 + json.dumps({"etiqueta": "fim", "mem_available_kb": 650000, "processos": 30, "desativados": 3, "data_livre_kb": 910000}) + "\n",
                 encoding="utf-8",
@@ -4553,10 +4555,14 @@ def selftest():
             json_report = json.loads(Path(visual["json"]).read_text(encoding="utf-8"))
             assert "<!doctype html>" in html_report.lower()
             assert "&lt;Marca&gt;" in html_report
-            assert "RAM disponível ao longo das ondas" in html_report
+            assert "RAM disponível por etapa" in html_report
+            assert "Ficha técnica do equipamento" in html_report
+            assert "Segurança do sistema" in html_report
+            assert "SpeedTV Box" in html_report
             assert json_report["desativados_nesta_sessao"] == ["com.example.disabled"]
     finally:
         _DADOS = dados_anteriores
+        _SESSAO_DIR = sessao_anterior
     say("selftest ok")
 
 
