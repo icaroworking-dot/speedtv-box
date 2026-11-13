@@ -3353,6 +3353,7 @@ main{max-width:1100px;margin:auto}header{padding:28px 0;border-bottom:1px solid 
             + card("Desativados nesta sessão", len(desligados or []), "ações registradas")
             + card("RAM disponível", ram_antes, "antes")
             + card("RAM disponível", ram_depois, "depois")
+            + card("Acesso root", "Confirmado" if antes.get("root") else "Não disponível", "verificado no início da auditoria")
         ))
         .replace("__RAM_CHART__", grafico("RAM disponível ao longo das ondas", "mem_available_kb", " kB"))
         .replace("__PROCESS_CHART__", grafico("Processos por etapa", "processos"))
@@ -3380,6 +3381,7 @@ def montar_relatorio_final(antes, depois, desligados, lixo, removidos_usuario=No
         "",
         "ANDROID",
         "  Antes: " + linha_android(antes),
+        "  Acesso root: " + ("confirmado" if antes.get("root") else "não disponível"),
     ]
     if depois:
         linhas.append("  Depois: " + linha_android(depois))
