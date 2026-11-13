@@ -2028,7 +2028,14 @@ def reverter(adb, sim=False):
             adb.shell("wm size " + msize.group(1), 12)
         else:
             adb.shell("wm size reset", 12)
-        say("  resolução da interface restaurada ao estado anterior.")
+        densidade_antes = journal.get("wm", {}).get("density_antes")
+        if densidade_antes:
+            mdensity = re.search(r"Override density:\\s*(\\d+)", densidade_antes)
+            if mdensity:
+                adb.shell("wm density " + mdensity.group(1), 12)
+            else:
+                adb.shell("wm density reset", 12)
+        say("  resolução/densidade da interface restauradas ao estado anterior.")
     if tem_oem:
         say(restaurar_oem(adb, tem_root(adb), journal))
     scripts_pendentes = []
@@ -3210,6 +3217,23 @@ def mostrar_leitura(r, lixo):
 
 
 
+def ler_diagnosticos_operacionais(pasta):
+    caminho=pasta/"diagnosticos.jsonl"
+    itens=[]
+    if not caminho.is_file(): return itens
+    try:
+        linhas=caminho.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return itens
+    for linha in linhas:
+        try:
+            item=json.loads(linha)
+            if isinstance(item,dict): itens.append(item)
+        except Exception:
+            continue
+    return itens
+
+
 def gerar_relatorio_visual(antes, depois, desligados, lixo):
     """Gera um relatório HTML offline e JSON com inventário e métricas por etapa."""
     pasta = garantir_dados()
@@ -3246,7 +3270,7 @@ def gerar_relatorio_visual(antes, depois, desligados, lixo):
             {"pacote": pkg, "nome": nome} for pkg, nome in (lixo or [])
         ],
         "metricas_por_etapa": metricas,
-        "diagnosticos_operacionais": [json.loads(x) for x in (pasta / "diagnosticos.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()] if (pasta / "diagnosticos.jsonl").is_file() else [],
+        "diagnosticos_operacionais": ler_diagnosticos_operacionais(pasta),
     }
     json_path = pasta / "relatorio.json"
     json_path.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
