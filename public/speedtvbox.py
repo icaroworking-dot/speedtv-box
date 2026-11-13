@@ -994,7 +994,7 @@ def salvar_journal(j):
 
 
 def anexar_log(nome, texto, resumo=""):
-    """Grava em $HOME/speedtv-dados e copia para a pasta SpeedTV da memória do celular."""
+    """Grava na pasta exclusiva da sessão atual, mantendo os nomes amigáveis."""
     titulo_log = _nome_arquivo({"auditoria": "Auditoria tecnica", "relatorio": "Resumo final"}.get(nome, nome))
     quando = datetime.now().strftime("%Y-%m-%d %H:%M")
     bruto = texto if isinstance(texto, str) else json.dumps(texto, indent=2, ensure_ascii=False)
@@ -4566,8 +4566,11 @@ def selftest():
     try:
         with tempfile.TemporaryDirectory(prefix="speedtv-selftest-") as tmp:
             _DADOS = Path(tmp)
-            _SESSAO_DIR = Path(tmp)
-            (Path(tmp) / "08 - Metricas.jsonl").write_text(
+            _SESSAO_DIR = Path(tmp) / "Sessoes" / "Sessao_teste"
+            _SESSAO_DIR.mkdir(parents=True, exist_ok=True)
+            assert pasta_sessao() == _SESSAO_DIR
+            assert caminho_journal().parent == Path(tmp)
+            (_SESSAO_DIR / "08 - Metricas.jsonl").write_text(
                 json.dumps({"etiqueta": "antes", "mem_available_kb": 500000, "processos": 42, "desativados": 0, "data_livre_kb": 900000}) + "\n"
                 + json.dumps({"etiqueta": "fim", "mem_available_kb": 650000, "processos": 30, "desativados": 3, "data_livre_kb": 910000}) + "\n",
                 encoding="utf-8",
@@ -4621,6 +4624,8 @@ def main(argv=None):
         selftest()
         return 0
     iniciar_sessao(args.cliente)
+    if _SESSAO_DIR:
+        say("Arquivos desta execução: %s" % _SESSAO_DIR)
     binary = find_adb()
     if not binary:
         say("Não achei o adb.")
