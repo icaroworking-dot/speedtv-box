@@ -2023,7 +2023,7 @@ def reverter(adb, sim=False):
         say("  ajuste %s restaurado" % chave)
     if journal.get("wm", {}).get("size_set"):
         anterior = journal.get("wm", {}).get("size_antes", "")
-        msize = re.search(r"Override size:\\s*(\\d+x\\d+)", anterior)
+        msize = re.search(r"Override size:\s*(\d+x\d+)", anterior)
         if msize:
             adb.shell("wm size " + msize.group(1), 12)
         else:
