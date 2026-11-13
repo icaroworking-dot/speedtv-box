@@ -38,8 +38,8 @@ Na primeira execução, escolha **1 — Começar**. O assistente conduz a audito
 - Modo sem Google opcional: permite desativar/reativar separadamente GMS, GSF, Play Store e serviços auxiliares. Não desinstala APKs e avisa sobre dependências.
 - Diagnóstico de rede para IPTV: Wi-Fi, RSSI/link, interfaces, rotas, DNS e testes básicos de latência/resolução. Não muda DNS, MTU ou rádio automaticamente.
 - Auditoria de codecs: lê MediaCodec, player/extractor, placa e saída de vídeo. Não promete adicionar decoders: codecs de hardware dependem do firmware/vendor.
-- Diagnóstico da barra lateral/navegação: coleta estado do Projectivy/Glass, HOME e configurações de imersão sem esconder botões nem alterar SystemUI.
-- Instala Glass Launcher (`com.fares.glass`) e Projectivy Launcher a partir dos repositórios oficiais dos desenvolvedores; tenta definir HOME, pede teste do botão do controle e só oferece desativar o launcher anterior depois da confirmação. A desativação é reversível.
+- Diagnóstico da barra de navegação: consulta HOME, Glass Launcher e configurações de imersão sem alterar o sistema. Para ocultar a barra nativa, há um comando ADB reversível documentado.
+- Instala somente Glass Launcher (`com.fares.glass`) como opção de tela inicial; tenta definir HOME, pede teste do botão do controle e só oferece desativar o launcher anterior depois da confirmação. A desativação é reversível. O menu também oferece o Downloader pela página oficial da Play Store.
 - Abre a página oficial do Google Play para instalar Downloader by AFTVnews; se a Play Store estiver desativada, pode reativá-la temporariamente com autorização e restaurar o estado anterior depois. A instalação final é confirmada pelo usuário na loja.
 - Inclui limpeza de cache pelo Package Manager e fechamento opcional de apps de usuário pesados, sem forçar parada de componentes do sistema.
 - Preserva a integração Gemini: a página injeta a chave e o IP no arquivo Python baixado; o agente usa o Gemini como apoio, sem executar comandos arbitrários retornados pelo modelo.
@@ -70,3 +70,6 @@ python public/speedtvbox.py selftest
 ## Publicação
 
 A página pode ser publicada pela Vercel ligada ao repositório. O agente é servido por `public/speedtvbox.py`. O gerador valida o conteúdo recebido, não depende de `localStorage` para funcionar e entrega um link real de salvamento após personalizar o arquivo. Quem já baixou um agente precisa gerar e salvar novamente para receber as correções.
+
+
+Para ocultar somente a barra de navegação nativa do Android (sem desativar os botões do controle remoto): `adb shell settings put global policy_control immersive.navigation=*`. Para restaurar o comportamento padrão: `adb shell settings delete global policy_control`. Teste a navegação antes de reiniciar.
