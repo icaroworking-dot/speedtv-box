@@ -1424,6 +1424,42 @@ def auditar(adb, falar=True):
     cpu = adb.shell("grep -m 1 -E 'Hardware|model name|Processor' /proc/cpuinfo", 12)
     ncpu = adb.shell("grep -c ^processor /proc/cpuinfo", 12).strip()
 
+    # Leituras complementares somente leitura; ausência de acesso vira "não informado".
+    cpu_freq = {}
+    for chave, arquivo in (("atual_khz", "scaling_cur_freq"), ("min_khz", "cpuinfo_min_freq"), ("max_khz", "cpuinfo_max_freq")):
+        valor = adb.shell("cat /sys/devices/system/cpu/cpu0/cpufreq/%s 2>/dev/null" % arquivo, 8).strip()
+        cpu_freq[chave] = int(valor) if valor.isdigit() else None
+    thermal_raw = adb.shell(
+        "for f in /sys/class/thermal/thermal_zone*/temp; do [ -r \"$f\" ] && echo \"$f=$(cat \"$f\" 2>/dev/null)\"; done 2>/dev/null | head -n 12",
+        12,
+    )
+    temperaturas = []
+    for linha in thermal_raw.splitlines():
+        mt = re.search(r"thermal_zone(\\d+)/temp=(-?\\d+)", linha)
+        if mt:
+            raw = int(mt.group(2))
+            celsius = raw / 1000.0 if abs(raw) >= 1000 else float(raw)
+            if -20 <= celsius <= 150:
+                temperaturas.append({"zona": int(mt.group(1)), "celsius": round(celsius, 1)})
+    display_size = adb.shell("wm size 2>/dev/null", 10).strip()
+    display_density = adb.shell("wm density 2>/dev/null", 10).strip()
+    selinux = adb.shell("getenforce 2>/dev/null", 8).strip()
+    security_state = {
+        "selinux": selinux or None,
+        "verified_boot": props.get("ro.boot.verifiedbootstate") or None,
+        "bootloader_locked": props.get("ro.boot.flash.locked") or None,
+        "vbmeta_state": props.get("ro.boot.vbmeta.device_state") or None,
+        "crypto_state": props.get("ro.crypto.state") or None,
+        "build_type": props.get("ro.build.type") or None,
+        "debuggable": props.get("ro.debuggable") or None,
+        "adb_enabled": adb.shell("settings get global adb_enabled 2>/dev/null", 8).strip() or None,
+        "install_non_market_apps": adb.shell("settings get secure install_non_market_apps 2>/dev/null", 8).strip() or None,
+    }
+    gpu = {
+        "egl": props.get("ro.hardware.egl") or props.get("ro.opengles.version") or None,
+        "gles": adb.shell("dumpsys SurfaceFlinger 2>/dev/null | grep -i -m 2 -E 'GLES:|OpenGL ES' ", 12).strip()[:240] or None,
+    }
+
     packages = adb.installed_map()
     sistema = adb.system_names()
     terceiros = adb.third_names()
@@ -1496,10 +1532,6 @@ def auditar(adb, falar=True):
     display = props.get("ro.build.display.id", "")
 
     try:
-        root_ok = bool(tem_root(adb))
-    except Exception:
-        root_ok = False
-    try:
         boot_scripts = varrer_boot(adb)
     except Exception:
         boot_scripts = []
@@ -1525,6 +1557,12 @@ def auditar(adb, falar=True):
         "abi": abis,
         "cpu": cpu.strip(),
         "nucleos": ncpu,
+        "cpu_freq": cpu_freq,
+        "temperaturas": temperaturas,
+        "display_size": display_size or None,
+        "display_density": display_density or None,
+        "seguranca_sistema": security_state,
+        "gpu": gpu,
         "ram_real_mb": real_mb,
         "ram_fonte": ram_fonte,
         "ram_meminfo_mb": mem_mb,
