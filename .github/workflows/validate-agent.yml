@@ -25,7 +25,7 @@ jobs:
       - name: Run built-in tests
         run: python public/speedtvbox.py selftest
 
-  # Re-run both suites whenever the agent, UI, or lockfile changes.
+  # Validate the current branch head before review or merge.
   web-app:
     runs-on: ubuntu-latest
     steps:
