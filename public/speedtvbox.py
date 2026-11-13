@@ -221,8 +221,6 @@ WAVE2 = [
     "com.tv.clean",
     "com.yxt.factorytest",
     "com.android.app.cus.aging",
-    "com.android.amediatech.fota",
-    "com.abupdate.fota_demo_iot",
     "com.google.android.youtube.tv.recommendations",
     "com.google.android.partnersetup",
     "com.google.android.backuptransport",
