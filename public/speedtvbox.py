@@ -3917,6 +3917,10 @@ def selftest():
     assert origem_https_permitida("https://api.github.com/repos/a/b", {"api.github.com"})
     assert not origem_https_permitida("http://api.github.com/repos/a/b", {"api.github.com"})
     assert not origem_https_permitida("https://api.github.com.evil.invalid/a", {"api.github.com"})
+    assert "com.tv.clean" in WAVE2
+    assert "com.yxt.factorytest" in WAVE2
+    assert ("tv.pluto.android", "Pluto TV") in LIXO_FABRICA
+    assert ("org.videolan.vlc", "VLC") in LIXO_FABRICA
     assert validar_pacote("com.android.vending")
     assert not validar_pacote("com.foo;rm")
     assert not validar_pacote("rm -rf")
