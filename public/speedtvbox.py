@@ -3661,13 +3661,6 @@ def instalar_launcher(adb, escolha):
             "pacote": "com.fares.glass",
             "arquivo": "FlareGlassLauncher.apk",
         },
-        "projectivy": {
-            "nome": "Projectivy Launcher",
-            "api": "https://api.github.com/repos/spocky/miproja1/releases/latest",
-            "hosts": {"api.github.com", "github.com", "release-assets.githubusercontent.com"},
-            "pacote": "com.spocky.projengmenu",
-            "arquivo": "ProjectivyLauncher.apk",
-        },
     }
     item = catalogo.get(escolha)
     if not item:
@@ -3768,7 +3761,6 @@ def menu_instalacoes(adb):
         say("Escolha o que quer colocar na TV Box:")
         say("  1  Downloader — navegador e instalador de APKs")
         say("  2  Glass Launcher — tela inicial leve")
-        say("  3  Projectivy Launcher — tela inicial personalizável")
         say("  0  Voltar")
         try:
             escolha = input("\nO que vamos instalar? ").strip()
@@ -3778,12 +3770,10 @@ def menu_instalacoes(adb):
             abrir_ou_instalar_downloader(adb)
         elif escolha == "2":
             instalar_launcher(adb, "glass")
-        elif escolha == "3":
-            instalar_launcher(adb, "projectivy")
         elif escolha in ("0", ""):
             return
         else:
-            say("Não reconheci essa opção. Escolha 1, 2, 3 ou 0.")
+            say("Não reconheci essa opção. Escolha 1, 2 ou 0.")
 
 
 def liberar_ram(adb):
@@ -3984,15 +3974,15 @@ def auditar_video(adb):
 def diagnosticar_barra(adb):
     titulo("Barra lateral/navegação — somente leitura")
     conectar_ou_explicar(adb)
-    for pkg in ("com.spocky.projengmenu","com.fares.glass"):
-        if adb.existe(pkg): say("%s instalado; enabled=%s"%(pkg,adb.enabled_code(pkg)))
+    pkg = "com.fares.glass"
+    if adb.existe(pkg): say("%s instalado; enabled=%s"%(pkg,adb.enabled_code(pkg)))
     say("HOME: "+(home_package(adb) or "não identificado"))
     for ns,key in (("global","policy_control"),("global","immersive_mode_confirmations"),
                    ("secure","immersive_mode_confirmations"),("system","navigationbar_is_min")):
         say("%s.%s = %s"%(ns,key,setting_get(adb,ns,key) or "(padrão/vazio)"))
     say("qemu.hw.mainkeys = "+(adb.prop("qemu.hw.mainkeys") or "(não definido)"))
-    say(adb.shell("dumpsys window 2>/dev/null | grep -i -E 'NavigationBar|StatusBar|Projectivy|projeng|Glass|fares' | head -n 80",25))
-    say("Não alterei SystemUI. O launcher pode apenas deixar de esconder a barra do sistema; Projectivy também pode ter painel próprio. A correção depende de identificar qual janela está visível.")
+    say(adb.shell("dumpsys window 2>/dev/null | grep -i -E 'NavigationBar|StatusBar|Glass|fares' | head -n 80",25))
+    say("Este diagnóstico é somente leitura. Para ocultar a barra nativa, use: adb shell settings put global policy_control immersive.navigation=*. Para desfazer: adb shell settings delete global policy_control. Isso oculta a barra sem desativar os botões do controle remoto; teste antes de reiniciar.")
 
 
 def menu(adb, sim=False, sem_onda3=False):
