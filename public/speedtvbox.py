@@ -38,7 +38,7 @@ DISPOSITIVO_PADRAO = "192.168.1.88:5555"
 API_KEY_PADRAO = ""
 MODELO = "gemini-3.8-flash"
 MODELOS_RESERVA = ("gemini-3.8-flash", "gemini-4-hydrogen")
-VERSAO = "9"
+VERSAO = "10"
 
 RAIZ = Path(__file__).resolve().parent
 _DADOS = None
@@ -409,6 +409,12 @@ SDK_RELEASE = {
     21: 5, 22: 5, 23: 6, 24: 7, 25: 7, 26: 8, 27: 8, 28: 9, 29: 10,
     30: 11, 31: 12, 32: 12, 33: 13, 34: 14, 35: 15, 36: 16, 37: 17,
 }
+SDK_ANDROID_VERSION = {
+    21: "5.0", 22: "5.1", 23: "6.0", 24: "7.0", 25: "7.1",
+    26: "8.0", 27: "8.1", 28: "9", 29: "10", 30: "11",
+    31: "12", 32: "12L", 33: "13", 34: "14", 35: "15",
+    36: "16", 37: "17",
+}
 # kernel (major, minor) → SDK honesto máximo, com folga de backport
 KERNEL_MAX_SDK = {
     (3, 4): 22, (3, 10): 24, (3, 14): 25, (3, 18): 26,
@@ -765,28 +771,29 @@ def kernel_max_sdk(kernel):
 
 
 def avaliar_android(sdk, release, kernel):
-    """Devolve dict com inconsistência de versão. Não acusa só por patch antigo."""
+    """SDK é a referência primária; release e kernel são verificações cruzadas."""
     notas = []
-    spoof = False
+    inconsistente = False
+    esperado = SDK_ANDROID_VERSION.get(sdk)
     major = release_major(release)
-    esperado = SDK_RELEASE.get(sdk)
-    if esperado and major and abs(esperado - major) >= 2:
-        spoof = True
+    if esperado and major and major != int(esperado.split(".")[0]):
+        inconsistente = True
         notas.append(
-            "release %s não combina com SDK %s (o par honesto dessa API é Android %s)"
-            % (release, sdk, esperado)
+            "SDK %s corresponde ao Android %s, mas ro.build.version.release anuncia %s."
+            % (sdk, esperado, release)
         )
     teto = kernel_max_sdk(kernel)
-    if teto and sdk and sdk > teto + 1:
-        spoof = True
+    # Kernel de fabricante pode receber backports; serve como alerta, nunca como prova.
+    if teto and sdk and sdk > teto + 2:
+        inconsistente = True
         notas.append(
-            "kernel %s.%s não sustenta SDK %s (teto honesto por volta do SDK %s). "
-            "A tela pode dizer Android %s e o sistema ser bem mais velho."
-            % (kernel[0], kernel[1], sdk, teto, release or "?")
+            "SDK %s parece alto para o kernel %s.%s (referência aproximada SDK %s); "
+            "confira outras propriedades e a versão real do firmware."
+            % (sdk, kernel[0], kernel[1], teto)
         )
     if not notas:
-        notas.append("SDK, release e kernel contam a mesma história, dentro da folga de fabricante.")
-    return {"mentira": spoof, "notas": notas, "teto_sdk": teto, "release_esperado": esperado}
+        notas.append("SDK, release e kernel não mostram divergência clara.")
+    return {"mentira": inconsistente, "notas": notas, "teto_sdk": teto, "release_esperado": esperado}
 
 
 def numero_mb(valor):
@@ -842,7 +849,7 @@ def parse_widevine(text):
         return "sem resposta do DRM"
     low = text.lower()
     if "widevine" not in low and "level" not in low:
-        return "Widevine não apareceu no dumpsys. TV Box sem certificação, ou o serviço de DRM não respondeu."
+        return "Widevine não apareceu na leitura disponível. Isso não prova ausência de certificação: o serviço pode não expor os dados neste Android."
     nivel = None
     for token in ("L1", "L2", "L3", "level1", "level3", "HW_SECURE_ALL", "HW_SECURE_DECODE", "SW_SECURE_CRYPTO"):
         if token.lower() in low or token in text:
@@ -3120,20 +3127,16 @@ def linha_android(r):
     ker = r.get("kernel") or "?"
     info = r.get("android") or {}
     esperado = info.get("release_esperado")
-    major = release_major(et)
-    if info.get("mentira") and esperado and major and major != esperado:
+    if esperado and info.get("mentira"):
         return (
-            "SDK %s corresponde à família Android %s, mas a propriedade de versão anuncia %s. "
-            "Kernel %s, sozinho, não prova firmware remarcado."
+            "SDK %s indica Android %s; ro.build.version.release anuncia %s. "
+            "Kernel %s é apenas verificação auxiliar. Inconsistência a investigar, "
+            "não prova isolada de firmware falsificado."
             % (sdk, esperado, et, ker)
         )
-    if info.get("mentira"):
-        return (
-            "Há inconsistência entre SDK %s, versão anunciada %s e kernel %s. "
-            "É um indício para investigar, não prova isolada de falsificação."
-            % (sdk, et, ker)
-        )
-    return "Android %s (SDK %s), kernel %s. Não achei incompatibilidade clara." % (et, sdk, ker)
+    if esperado:
+        return "Android %s (SDK %s), kernel %s. Família identificada pelo SDK." % (esperado, sdk, ker)
+    return "Android anunciado %s (SDK %s), kernel %s. SDK não mapeado; conferir firmware." % (et, sdk, ker)
 
 
 def linha_ram(r):
@@ -3345,9 +3348,8 @@ def montar_relatorio_final(antes, depois, desligados, lixo):
         "",
         "WIDEVINE",
         "  " + linha_wide(antes),
-        "  L1 de TV Box genérica só vale se um filme protegido tocar em HD.",
-        "  Sem root o nível não muda. Com root, a opção Widevine esconde a biblioteca falsa",
-        "  e o Android assume L3 de verdade, em SD.",
+        "  A leitura do dumpsys é indicativa; ausência de dados não prova falta de certificação.",
+        "  Não altere nem esconda bibliotecas DRM para tentar liberar HD: isso pode quebrar reprodução protegida.",
         "",
         "APLICATIVOS",
         "  Antes: %s pacotes, %s de sistema, %s de terceiros."
@@ -3385,7 +3387,7 @@ def montar_relatorio_final(antes, depois, desligados, lixo):
         "",
         "COMO LER",
         "  A RAM que vale é a do kernel, não a da etiqueta.",
-        "  O Android que vale é o que o kernel aguenta, não o número da tela Sobre.",
+        "  A família Android é estimada pelo SDK; release e kernel são verificações auxiliares.",
         "  Desativado para o usuário volta no reset de fábrica. Nada foi apagado de /system.",
     ]
     return "\n".join(linhas)
