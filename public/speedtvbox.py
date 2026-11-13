@@ -995,8 +995,7 @@ def salvar_journal(j):
 
 def anexar_log(nome, texto, resumo=""):
     """Grava em $HOME/speedtv-dados e copia para a pasta SpeedTV da memória do celular."""
-    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    titulo_log = _nome_arquivo(nome)
+    titulo_log = _nome_arquivo({"auditoria": "Auditoria tecnica", "relatorio": "Resumo final"}.get(nome, nome))
     quando = datetime.now().strftime("%Y-%m-%d %H:%M")
     bruto = texto if isinstance(texto, str) else json.dumps(texto, indent=2, ensure_ascii=False)
     blob = (
@@ -1005,7 +1004,7 @@ def anexar_log(nome, texto, resumo=""):
         "RESUMO\n%s\n\nBRUTO\n%s\n"
     ) % (titulo_log, quando, (resumo or "(sem resumo)").strip(), bruto)
     pasta = pasta_sessao()
-    path = pasta / ("%s - %s.txt" % (datetime.now().strftime("%H-%M-%S"), titulo_log))
+    path = pasta / ("%s - %s.txt" % (datetime.now().strftime("%H-%M-%S-%f"), titulo_log))
     path.write_text(blob, encoding="utf-8")
     copia = publicar_relatorio(path)
     return copia or path
@@ -1024,10 +1023,10 @@ def dizer_onde(path):
         return
     say("Arquivo: %s" % path)
     if "Download" in str(path) or "downloads" in str(path):
-        say("Abra o app Arquivos, pasta Download, pasta SpeedTV.")
+        say("Abra Arquivos > Download > SpeedTV > Sessoes > %s." % (Path(path).parent.name if Path(path).parent.name != "Sessoes" else Path(path).name))
     else:
-        say("Ficou só dentro do Termux. Rode uma vez: termux-setup-storage")
-        say("Aceite o acesso. Aí os próximos relatórios vão para Download/SpeedTV.")
+        say("Ficou dentro do Termux, na pasta da sessão: %s" % Path(path).parent)
+        say("Para copiar para Download, rode termux-setup-storage e aceite o acesso.")
 
 
 def anexar_metricas(item):
@@ -1606,6 +1605,9 @@ def auditar(adb, falar=True):
     }
     path = garantir_dados() / "auditoria-ultima.json"
     path.write_text(json.dumps(relatorio, indent=2, ensure_ascii=False), encoding="utf-8")
+    (pasta_sessao() / "02 - Auditoria mais recente.json").write_text(
+        json.dumps(relatorio, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     resumo = "\n".join(frases_relatorio(relatorio))
     log = anexar_log("auditoria", json.dumps(relatorio, indent=2, ensure_ascii=False), resumo)
     if falar:
@@ -4215,7 +4217,7 @@ def gerenciar_ota(adb):
 def registrar_relatorio_operacional(tipo,resumo,dados):
     pasta=pasta_sessao(); registro={"quando":agora_iso(),"tipo":tipo,"resumo":resumo,"dados":dados}
     with (pasta/"diagnosticos.jsonl").open("a",encoding="utf-8") as fh: fh.write(json.dumps(registro,ensure_ascii=False)+"\n")
-    base="%s - %s"%(datetime.now().strftime("%H-%M-%S"),_nome_arquivo(tipo))
+    base="%s - %s"%(datetime.now().strftime("%H-%M-%S-%f"),_nome_arquivo(tipo))
     bruto=json.dumps(dados,indent=2,ensure_ascii=False)
     txt=pasta/(base+".txt"); txt.write_text("SpeedTV Box — %s\nQuando: %s\n\nRESUMO\n%s\n\nDETALHES TÉCNICOS\n%s\n"%(tipo,registro["quando"],resumo,bruto),encoding="utf-8")
     h=pasta/(base+".html"); h.write_text("<!doctype html><html lang='pt-BR'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>SpeedTV Box — %s</title><style>body{font:16px system-ui;background:#07101f;color:#eef5ff;max-width:900px;margin:32px auto;padding:0 18px}article{background:#101d31;border:1px solid #263852;border-radius:14px;padding:18px;margin:14px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#c5d4e8;font-size:13px}</style><h1>SpeedTV Box — %s</h1><article><h2>Resumo</h2><p>%s</p></article><article><h2>Registro técnico</h2><pre>%s</pre></article></html>"%tuple(html.escape(x) for x in (tipo,tipo,resumo,bruto)),encoding="utf-8")
